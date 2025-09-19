@@ -1,31 +1,141 @@
+/* Dashboard container */
 .dashboard {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
-  height: 100vh;
+  min-height: 100vh;
   background: #e5ddd5; /* WhatsApp-like background */
   font-family: "Segoe UI", Arial, sans-serif;
-  position: relative; /* Needed for logout-btn absolute positioning */
+  padding: 20px;
+  position: relative;
 }
 
+/* Product list */
+.product-list {
+  width: 100%;
+  max-width: 800px;
+  margin: 20px 0;
+}
+
+.product-list h3 {
+  font-size: 24px;
+  color: #333;
+  margin-bottom: 15px;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+}
+
+.product-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 15px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.product-card:hover {
+  transform: translateY(-5px);
+}
+
+.product-card h4 {
+  font-size: 18px;
+  color: #007bff;
+  margin: 0 0 10px;
+}
+
+.product-card p {
+  margin: 5px 0;
+  font-size: 14px;
+  color: #555;
+}
+
+/* Chatbot icon */
+.chatbot-icon {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chatbot-icon:hover {
+  background: #0056b3;
+}
 
 /* Chat container */
 .chat-container {
   display: flex;
   flex-direction: column;
-  width: 500px;
-  height: 80vh;
-  margin: auto;
+  width: 800px;
+  height: 70vh;
   background: #fff;
-  padding: 20px;
   border-radius: 12px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  position: fixed;
+  bottom: 90px;
+  right: 20px;
+  z-index: 900;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.chat-container.closed {
+  opacity: 0;
+  transform: translateY(20px);
+  pointer-events: none;
+}
+
+.chat-container.open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Chat header */
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background: #007bff;
+  color: white;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.chat-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.close-chat {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.close-chat:hover {
+  color: #e0e0e0;
 }
 
 /* Chat messages area */
 .chat-box {
   flex: 1;
-  border: none;
   padding: 10px;
   margin-bottom: 10px;
   overflow-y: auto;
@@ -33,7 +143,7 @@
   background: #f0f0f0;
   display: flex;
   flex-direction: column;
-  font-size: 16px; /* bigger text */
+  font-size: 16px;
   line-height: 1.5;
 }
 
@@ -43,11 +153,11 @@
   background: #007bff;
   color: white;
   padding: 10px 14px;
-  margin: 6px 0;
+  margin: 6px 10px;
   border-radius: 18px 18px 0 18px;
   max-width: 70%;
   word-wrap: break-word;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 /* Bot message (left side) */
@@ -56,11 +166,11 @@
   background: #e4e6eb;
   color: black;
   padding: 10px 14px;
-  margin: 6px 0;
+  margin: 6px 10px;
   border-radius: 18px 18px 18px 0;
   max-width: 70%;
   word-wrap: break-word;
-  font-size: 16px;
+  font-size: 15px;
 }
 
 /* Chat input */
@@ -68,32 +178,41 @@
   display: flex;
   gap: 10px;
   border-top: 1px solid #ccc;
-  padding-top: 10px;
+  padding: 10px;
+  background: #fff;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
 
 .chat-input input {
   flex: 1;
-  padding: 12px;
-  border-radius: 25px;
+  padding: 10px;
+  border-radius: 20px;
   border: 1px solid #ccc;
-  font-size: 16px;
+  font-size: 14px;
   outline: none;
 }
 
 .chat-input button {
-  padding: 12px 16px;
+  padding: 10px;
   background: #007bff;
   color: white;
   border: none;
   border-radius: 50%;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 16px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .chat-input button:hover {
   background: #0056b3;
 }
-/* Logout button in top-right corner */
+
+/* Logout button */
 .logout-btn {
   position: absolute;
   top: 20px;
@@ -111,4 +230,13 @@
 
 .logout-btn:hover {
   background: #cc0000;
+}
+
+/* Loading and error states */
+.loading,
+.error-message {
+  font-size: 18px;
+  color: #333;
+  text-align: center;
+  margin-top: 20px;
 }

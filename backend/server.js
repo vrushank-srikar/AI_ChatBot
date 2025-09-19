@@ -39,7 +39,14 @@ async function callGemini(prompt) {
       if (code === 429) {
         console.warn(`Model ${model} quota exhausted, trying next model...`);
         continue;
+      } else if (code === 400) {
+        console.error(`Bad request for ${model}: ${err.response?.data?.error?.message}`);
+        throw new Error(`Invalid request to Gemini API: ${err.response?.data?.error?.message}`);
+      } else if (code === 401) {
+        console.error(`Authentication error for ${model}: ${err.response?.data?.error?.message}`);
+        throw new Error("Gemini API authentication failed");
       } else {
+        console.error(`Error with ${model}: ${err.message}`);
         throw err;
       }
     }
@@ -85,12 +92,37 @@ async function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
+    req.userRole = decoded.role; // Add role to req
     next();
   } catch (err) {
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 }
-
+app.get("/api/user/:id", authMiddleware, async (req, res) => {
+  try {
+    const start = Date.now();
+    const user = await User.findById(req.params.id).lean();
+    console.log(`User.findById took ${Date.now() - start}ms for ID: ${req.params.id}`);
+    if (!user) {
+      console.log(`User not found for ID: ${req.params.id}`);
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (req.userId !== req.params.id && req.userRole !== "admin") {
+      console.log(`Unauthorized access attempt by user ${req.userId} for ID: ${req.params.id}`);
+      return res.status(403).json({ error: "Unauthorized access" });
+    }
+    delete user.password;
+    res.json(user);
+  } catch (err) {
+    console.error("User fetch error:", {
+      message: err.message,
+      name: err.name,
+      code: err.code,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
 // --- Signup ---
 app.post("/api/signup", async (req, res) => {
   try {

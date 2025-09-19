@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { Link } from "react-router-dom";
+import { jwtDecode } from "jwt-decode"; // ✅ Corrected import
 import "../styles/form.css";
 
 export default function Login() {
@@ -14,7 +15,6 @@ export default function Login() {
       return;
     }
 
-    // Email format check
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(form.email)) {
       alert("Invalid email format");
@@ -23,13 +23,22 @@ export default function Login() {
 
     try {
       const res = await axios.post("http://localhost:5000/api/login", form);
-      localStorage.setItem("token", res.data.token);
+
+      const token = res.data.token;
+      localStorage.setItem("token", token);
+
+      // Decode JWT to get MongoDB user _id
+      const decoded = jwtDecode(token); // ✅ Updated to jwtDecode
+      const userId = decoded.id;
+
+      // Redirect based on role
       if (res.data.role === "admin") {
-        window.location.href = "/admin-dashboard";
+        window.location.href = `/admin/${userId}`;
       } else {
-        window.location.href = "/user-dashboard";
+        window.location.href = `/user/${userId}`;
       }
     } catch (err) {
+      console.error(err);
       alert(err.response?.data?.error || "Login failed");
     }
   };
