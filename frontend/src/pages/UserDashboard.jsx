@@ -1,3 +1,4 @@
+// Updated UserDashboard.js - Show User Cases
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
@@ -9,8 +10,9 @@ export default function UserDashboard() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [user, setUser] = useState(null);
+  const [userCases, setUserCases] = useState([]);
   const [error, setError] = useState(null);
-  const [isChatOpen, setIsChatOpen] = useState(false); // Control chat visibility
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const navigate = useNavigate();
   const chatBoxRef = useRef(null);
 
@@ -58,6 +60,23 @@ export default function UserDashboard() {
     };
     fetchUser();
   }, [id, navigate]);
+
+  // Fetch user cases
+  useEffect(() => {
+    const fetchUserCases = async () => {
+      if (!id) return;
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.get(`http://localhost:5000/api/user/${id}/cases`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setUserCases(res.data.cases);
+      } catch (err) {
+        console.error("Failed to fetch user cases:", err);
+      }
+    };
+    fetchUserCases();
+  }, [id]);
 
   useEffect(() => {
     if (chatBoxRef.current && isChatOpen) {
@@ -120,7 +139,7 @@ export default function UserDashboard() {
     return (
       <div className="dashboard">
         <h2>Error</h2>
-        <p>{error}</p>
+        <p className="error-message">{error}</p>
         <button onClick={() => navigate("/")}>Back to Login</button>
       </div>
     );
@@ -134,13 +153,13 @@ export default function UserDashboard() {
     );
   }
 
-  // Flatten all products from orders
   const allProducts = user.orders.flatMap((order) =>
-    order.products.map((product) => ({
+    order.products.map((product, index) => ({
       ...product,
       orderId: order.orderId,
       orderDate: order.orderDate,
       status: order.status,
+      productIndex: index,
     }))
   );
 
@@ -148,7 +167,6 @@ export default function UserDashboard() {
     <div className="dashboard">
       <h2>Welcome, {user.name}</h2>
 
-      {/* Product List */}
       <div className="product-list">
         <h3>Your Ordered Products</h3>
         {allProducts.length > 0 ? (
@@ -169,12 +187,39 @@ export default function UserDashboard() {
         )}
       </div>
 
-      {/* Chatbot Icon */}
+      {/* User Cases Section */}
+      <div className="cases-section">
+        <h3>Your Cases</h3>
+        {userCases.length > 0 ? (
+          <div className="cases-list">
+            {userCases.map((caseItem) => (
+              <div key={caseItem._id} className="case-card">
+                <h4>Case ID: {caseItem._id}</h4>
+                <p><strong>Order ID:</strong> {caseItem.orderId}</p>
+                <p><strong>Description:</strong> {caseItem.description}</p>
+                <p><strong>Status:</strong> {caseItem.status}</p>
+                <p><strong>Priority:</strong> {caseItem.priority}</p>
+                {caseItem.responses && caseItem.responses.length > 0 && (
+                  <div>
+                    <h5>Admin Responses:</h5>
+                    {caseItem.responses.map((response, idx) => (
+                      <p key={idx}><strong>{response.adminId?.name}:</strong> {response.message}</p>
+                    ))}
+                  </div>
+                )}
+                <small>Created: {new Date(caseItem.createdAt).toLocaleString()}</small>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>No cases created yet. Chat with the assistant about any product issues to create one automatically.</p>
+        )}
+      </div>
+
       <button className="chatbot-icon" onClick={toggleChat}>
         💬
       </button>
 
-      {/* Chat Interface (toggles visibility) */}
       <div className={`chat-container ${isChatOpen ? "open" : "closed"}`}>
         <div className="chat-header">
           <h3>Chat with Assistant</h3>
@@ -196,7 +241,7 @@ export default function UserDashboard() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
+            placeholder="Type your message... (e.g., 'I have a problem with my order product')"
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
           />
           <button onClick={handleSend}>➤</button>

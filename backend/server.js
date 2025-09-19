@@ -1,4 +1,4 @@
-// server.js
+// server.js - Fixed Regex, Enhanced Prompt, and Robust Fallback
 import express from "express";
 import mongoose from "mongoose";
 import dotenv from "dotenv";
@@ -10,6 +10,15 @@ import { createClient } from "redis";
 
 dotenv.config();
 
+// Validate environment variables
+const requiredEnv = ["MONGO_URI", "JWT_SECRET", "GEMINI_API_KEY"];
+requiredEnv.forEach((key) => {
+  if (!process.env[key]) {
+    console.error(`Missing environment variable: ${key}`);
+    process.exit(1);
+  }
+});
+
 const app = express();
 app.use(express.json());
 app.use(cors());
@@ -17,6 +26,9 @@ app.use(cors());
 // --- Redis Client ---
 const redisClient = createClient({
   url: process.env.REDIS_URL || "redis://localhost:6379",
+  socket: {
+    reconnectStrategy: (retries) => Math.min(retries * 50, 1000),
+  },
 });
 redisClient.on("error", (err) => console.error("Redis Error:", err));
 await redisClient.connect();
@@ -82,7 +94,33 @@ const userSchema = new mongoose.Schema({
     },
   ],
 });
+userSchema.index({ email: 1 }, { unique: true });
 const User = mongoose.model("User", userSchema);
+
+// --- Case Schema ---
+const caseSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  orderId: { type: String, required: true },
+  productIndex: { type: Number, required: true },
+  description: { type: String, required: true },
+  priority: { type: Number, default: 1, enum: [1, 2, 3] },
+  status: { type: String, default: "open", enum: ["open", "in-progress", "resolved"] },
+  productChanges: {
+    name: String,
+    price: Number,
+    quantity: Number,
+  },
+  responses: [
+    {
+      adminId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      message: String,
+      timestamp: { type: Date, default: Date.now },
+    },
+  ],
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+const Case = mongoose.model("Case", caseSchema);
 
 // --- Middleware: Auth ---
 async function authMiddleware(req, res, next) {
@@ -92,12 +130,15 @@ async function authMiddleware(req, res, next) {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.userId = decoded.id;
-    req.userRole = decoded.role; // Add role to req
+    req.userRole = decoded.role;
     next();
   } catch (err) {
+    console.error("Auth middleware error:", err);
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 }
+
+// --- User Fetch ---
 app.get("/api/user/:id", authMiddleware, async (req, res) => {
   try {
     const start = Date.now();
@@ -123,6 +164,143 @@ app.get("/api/user/:id", authMiddleware, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch user" });
   }
 });
+
+// --- Get User Cases ---
+app.get("/api/user/:id/cases", authMiddleware, async (req, res) => {
+  if (req.userRole !== "user") {
+    return res.status(403).json({ error: "User access required" });
+  }
+  try {
+    const cases = await Case.find({ userId: req.params.id })
+      .populate("userId", "name email")
+      .populate("responses.adminId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ cases });
+  } catch (err) {
+    console.error("User cases error:", err);
+    res.status(500).json({ error: "Failed to fetch cases" });
+  }
+});
+
+// --- Get All Cases (Admin) ---
+app.get("/api/admin/cases", authMiddleware, async (req, res) => {
+  if (req.userRole !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  try {
+    const cases = await Case.find()
+      .populate("userId", "name email")
+      .populate("responses.adminId", "name")
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ cases });
+  } catch (err) {
+    console.error("Admin cases error:", err);
+    res.status(500).json({ error: "Failed to fetch cases" });
+  }
+});
+// Add this endpoint after the existing admin cases endpoint
+app.get("/api/admin/orders", authMiddleware, async (req, res) => {
+  if (req.userRole !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  try {
+    const users = await User.find({}, "name email orders").lean();
+    const orders = users.flatMap(user => 
+      user.orders.map(order => ({
+        ...order,
+        userId: user._id,
+        userName: user.name,
+        userEmail: user.email
+      }))
+    );
+    res.json({ orders });
+  } catch (err) {
+    console.error("Admin orders error:", err);
+    res.status(500).json({ error: "Failed to fetch orders" });
+  }
+});
+// --- Update Case Response (Admin) ---
+app.post("/api/case/:id/response", authMiddleware, async (req, res) => {
+  if (req.userRole !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  try {
+    const { message } = req.body;
+    if (!message) {
+      return res.status(400).json({ error: "Message required" });
+    }
+    const updatedCase = await Case.findByIdAndUpdate(
+      req.params.id,
+      {
+        $push: { responses: { adminId: req.userId, message } },
+        updatedAt: new Date(),
+      },
+      { new: true }
+    )
+      .populate("userId", "name email")
+      .populate("responses.adminId", "name")
+      .lean();
+
+    if (!updatedCase) {
+      return res.status(404).json({ error: "Case not found" });
+    }
+
+    res.json({ message: "Response added successfully", case: updatedCase });
+  } catch (err) {
+    console.error("Add response error:", err);
+    res.status(500).json({ error: "Failed to add response" });
+  }
+});
+
+// --- Update Case (Admin Only - Priority/Status/Product Changes) ---
+app.put("/api/case/:id", authMiddleware, async (req, res) => {
+  if (req.userRole !== "admin") {
+    return res.status(403).json({ error: "Admin access required" });
+  }
+  try {
+    const caseId = req.params.id;
+    const updates = req.body;
+    const updatedCase = await Case.findByIdAndUpdate(
+      caseId,
+      { ...updates, updatedAt: new Date() },
+      { new: true }
+    )
+      .populate("userId", "name email orders")
+      .populate("responses.adminId", "name")
+      .lean();
+
+    if (!updatedCase) {
+      return res.status(404).json({ error: "Case not found" });
+    }
+
+    // Sync product changes to user's orders if productChanges provided
+    if (updates.productChanges) {
+      const user = await User.findById(updatedCase.userId._id);
+      const order = user.orders.find((o) => o.orderId === updatedCase.orderId);
+      if (order && order.products[updatedCase.productIndex]) {
+        const product = order.products[updatedCase.productIndex];
+        if (updates.productChanges.name !== undefined) product.name = updates.productChanges.name;
+        if (updates.productChanges.price !== undefined) product.price = updates.productChanges.price;
+        if (updates.productChanges.quantity !== undefined) product.quantity = updates.productChanges.quantity;
+
+        // Recalculate totalAmount if price changed
+        if (updates.productChanges.price !== undefined) {
+          order.totalAmount = order.products.reduce((sum, p) => sum + (p.price * p.quantity), 0);
+        }
+
+        await user.save();
+      }
+    }
+
+    res.json({ message: "Case updated successfully", case: updatedCase });
+  } catch (err) {
+    console.error("Update case error:", err);
+    res.status(500).json({ error: "Failed to update case" });
+  }
+});
+
 // --- Signup ---
 app.post("/api/signup", async (req, res) => {
   try {
@@ -132,7 +310,7 @@ app.post("/api/signup", async (req, res) => {
     await user.save();
     res.json({ message: "Signup successful" });
   } catch (err) {
-    console.error(err);
+    console.error("Signup error:", err);
     res.status(400).json({ error: "Signup failed" });
   }
 });
@@ -141,7 +319,9 @@ app.post("/api/signup", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await User.findOne({ email });
+    const start = Date.now();
+    const user = await User.findOne({ email }, "name email password role orders").lean();
+    console.log(`User.findOne took ${Date.now() - start}ms`);
     if (!user) return res.status(400).json({ error: "Invalid email" });
 
     const isMatch = await bcrypt.compare(password, user.password);
@@ -149,43 +329,44 @@ app.post("/api/login", async (req, res) => {
 
     const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-    const userData = { ...user.toObject() };
+    const userData = { ...user };
     delete userData.password;
 
-    // Save user session in Redis
     await redisClient.set(`user:${user._id}`, JSON.stringify(userData), { EX: 3600 });
     await redisClient.del(`chat:${user._id}`);
 
     res.json({ token, role: user.role });
   } catch (err) {
-    console.error(err);
+    console.error("Login error:", err);
     res.status(500).json({ error: "Login failed" });
   }
 });
 
 // --- Logout ---
-app.post("/api/logout", async (req, res) => {
+app.post("/api/logout", authMiddleware, async (req, res) => {
   try {
-    // Delete all Redis data
-    await redisClient.flushAll();
-    console.log("All Redis data cleared");
-    res.json({ message: "Logout successful, Redis memory cleared (all keys)" });
+    const userId = req.userId;
+    await redisClient.del(`user:${userId}`);
+    await redisClient.del(`chat:${userId}`);
+    console.log(`User ${userId} session and chat history cleared`);
+    res.json({ message: "Logout successful" });
   } catch (err) {
     console.error("Logout error:", err);
     res.status(500).json({ error: "Logout failed" });
   }
 });
 
-// --- Chat ---
+// --- Chat - Fixed Regex and Enhanced Prompt ---
 app.post("/api/chat", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
     const { message } = req.body;
 
-    // --- Get user data from Redis ---
     let userData = await redisClient.get(`user:${userId}`);
     if (!userData) {
-      const user = await User.findById(userId).lean();
+      const start = Date.now();
+      const user = await User.findById(userId, "name email role orders").lean();
+      console.log(`User.findById took ${Date.now() - start}ms`);
       if (!user) return res.status(404).json({ error: "User not found" });
       delete user.password;
       delete user.__v;
@@ -194,50 +375,175 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
     }
     const user = JSON.parse(userData);
 
-    // --- Chat history ---
     const chatHistory = (await redisClient.lRange(`chat:${userId}`, 0, -1)).map(JSON.parse);
 
-    // --- Build prompt ---
-    let prompt = "You are a helpful assistant.\n";
-    const lowerMsg = message.toLowerCase();
-    if (lowerMsg.includes("order") || lowerMsg.includes("status") || lowerMsg.includes("delivery")) {
-      const orderText = user.orders.map(o => `**Order ID:** ${o.orderId}
-- **Status:** ${o.status}
-- **Total Amount:** ₹${o.totalAmount}
-- **Payment Method:** ${o.paymentMethod}
-- **Order Date:** ${new Date(o.orderDate).toLocaleString()}
-- **Expected Delivery:** ${o.delivery.expectedDeliveryDate}
-- **Delivery Address:** ${o.delivery.address}, Pincode: ${o.delivery.pincode}
-- **Products:**
-${o.products.map(p => `  - ${p.name} (Qty: ${p.quantity}, Price: ₹${p.price})`).join("\n")}`).join("\n\n");
-
-      prompt += `User Data:\nName: ${user.name}\nEmail: ${user.email}\nRole: ${user.role}\n\nOrders:\n${orderText}\n`;
+    // Build concise order text with clear indices
+    let orderText = "User Orders:\n";
+    if (user.orders && user.orders.length > 0) {
+      user.orders.forEach((o, orderIdx) => {
+        orderText += `Order ${o.orderId} (Status: ${o.status}, Date: ${new Date(o.orderDate).toLocaleDateString()}):\n`;
+        o.products.forEach((p, prodIdx) => {
+          orderText += `  Product Index ${prodIdx}: ${p.name} (Qty: ${p.quantity}, Price: ₹${p.price})\n`;
+        });
+        orderText += "\n";
+      });
+    } else {
+      orderText += "No orders found.\n";
     }
 
-    if (chatHistory.length > 0) {
-      prompt += "\nChat History:\n" + chatHistory.map(c => `Q: ${c.prompt}\nA: ${c.reply}`).join("\n\n");
-    }
+    // Improved, structured prompt
+    let prompt = `You are a helpful e-commerce assistant. Always use the provided user data below when answering questions about orders, products, or creating support cases.
 
-    prompt += `\nUser Query: "${message}"\nAnswer based only on the user's data and orders.`;
+USER DATA:
+Name: ${user.name}
+Email: ${user.email}
+Role: ${user.role}
 
-    // --- Call Gemini ---
+${orderText}
+
+INSTRUCTIONS:
+- If the user asks about their products or orders (e.g., "what are my products", "show my orders"), list them directly from the USER DATA above in a clear, bulleted format. Do not say you have no access.
+- If the user wants to create a support case/ticket (keywords: "create case", "report issue", "problem with", "complaint", "refund", "return", "defective", "delivery issue"), identify the relevant orderId and productIndex from USER DATA by matching the product name case-insensitively. If multiple products match, choose the first match. Then, respond helpfully (e.g., "I've created a support case for your [product]...") and end your response with exactly this JSON on a new line, without wrapping in code blocks, backticks, or extra text: {"createCase": true, "orderId": "exact_order_id", "productIndex": exact_number, "description": "brief_summary_of_issue"}
+- If no product match is found or the query is ambiguous (e.g., no specific product mentioned), respond with: "Please specify the product and order for your issue." and do not include JSON.
+- For other queries, answer normally using the USER DATA if relevant.
+- Ensure responses are concise, helpful, and strictly follow the JSON format for case creation.
+
+Chat History:
+${chatHistory.length > 0 ? chatHistory.slice(-5).map(c => `Q: ${c.prompt}\nA: ${c.reply}`).join("\n\n") : "No history."}
+
+User Query: "${message}"
+
+Your Response:`;
+
+    console.log("Full prompt sent to Gemini:", prompt.substring(0, 500) + "..."); // Log truncated prompt for debugging
+
     const reply = await callGemini(prompt);
 
-    // --- Save chat in Redis ---
-    await redisClient.rPush(`chat:${userId}`, JSON.stringify({ prompt: message, reply }));
+    console.log("Gemini reply:", reply); // Log full reply for debugging
+
+    // Parse for case creation JSON, handling Markdown code blocks
+    let caseData = null;
+    try {
+      // Remove Markdown code block markers if present
+      const cleanReply = reply.replace(/```(?:json)?\n|\n```/g, "").trim();
+      console.log("Cleaned reply for JSON parsing:", cleanReply);
+      // Match JSON at the end or standalone
+      const jsonMatch = cleanReply.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}(?=\s*$)/);
+      if (jsonMatch) {
+        caseData = JSON.parse(jsonMatch[0]);
+        console.log("Parsed case data:", caseData);
+        if (caseData.createCase) {
+          // Verify orderId and productIndex exist
+          const userWithOrders = await User.findById(userId).select("orders");
+          const order = userWithOrders.orders.find(o => o.orderId === caseData.orderId);
+          const productIndexValid = order && caseData.productIndex >= 0 && caseData.productIndex < order.products.length;
+
+          if (order && productIndexValid) {
+            const existingCase = await Case.findOne({
+              userId,
+              orderId: caseData.orderId,
+              productIndex: caseData.productIndex,
+            });
+            if (!existingCase) {
+              const newCase = new Case({
+                userId,
+                orderId: caseData.orderId,
+                productIndex: caseData.productIndex,
+                description: caseData.description || message,
+              });
+              await newCase.save();
+              console.log(`Auto-created case for user ${userId}: ${newCase._id} for order ${caseData.orderId}, product index ${caseData.productIndex}`);
+            } else {
+              console.log(`Case already exists for user ${userId}, order ${caseData.orderId}, product index ${caseData.productIndex}`);
+            }
+          } else {
+            console.log(`Invalid orderId or productIndex in case data: orderId=${caseData.orderId}, productIndex=${caseData.productIndex}`);
+          }
+        }
+      } else {
+        console.log("No JSON found in cleaned reply");
+      }
+    } catch (parseErr) {
+      console.error("Failed to parse case JSON from reply:", parseErr, "Reply:", reply);
+    }
+
+    // Fallback case creation for keywords if no JSON
+    if (!caseData) {
+      const caseKeywords = ["create case", "report issue", "problem with", "complaint", "refund", "return", "defective", "delivery issue"];
+      const lowerMessage = message.toLowerCase();
+      if (caseKeywords.some(keyword => lowerMessage.includes(keyword))) {
+        // Try to match product name
+        const userWithOrders = await User.findById(userId).select("orders");
+        let matchedOrder = null;
+        let matchedProductIndex = null;
+        for (const order of userWithOrders.orders) {
+          for (let i = 0; i < order.products.length; i++) {
+            if (lowerMessage.includes(order.products[i].name.toLowerCase())) {
+              matchedOrder = order;
+              matchedProductIndex = i;
+              break;
+            }
+          }
+          if (matchedOrder) break;
+        }
+        if (matchedOrder && matchedProductIndex !== null) {
+          const existingCase = await Case.findOne({
+            userId,
+            orderId: matchedOrder.orderId,
+            productIndex: matchedProductIndex,
+          });
+          if (!existingCase) {
+            const newCase = new Case({
+              userId,
+              orderId: matchedOrder.orderId,
+              productIndex: matchedProductIndex,
+              description: message,
+            });
+            await newCase.save();
+            console.log(`Fallback: Auto-created case for user ${userId}: ${newCase._id} for order ${matchedOrder.orderId}, product index ${matchedProductIndex}`);
+          } else {
+            console.log(`Fallback: Case already exists for user ${userId}, order ${matchedOrder.orderId}, product index ${matchedProductIndex}`);
+          }
+        } else {
+          console.log("Fallback: No product match found for case creation");
+        }
+      }
+    }
+
+    // Clean reply by removing JSON (including Markdown) if present
+    const cleanReply = reply.replace(/```(?:json)?\n|\n```|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}(?=\s*$)/g, "").trim();
+
+    await redisClient.rPush(`chat:${userId}`, JSON.stringify({ prompt: message, reply: cleanReply }));
     await redisClient.expire(`chat:${userId}`, 86400);
 
-    res.json({ reply });
+    res.json({ reply: cleanReply });
   } catch (err) {
     console.error("Chat error:", err.response?.data || err.message);
     res.status(500).json({ error: "Chat failed" });
   }
 });
 
-// --- MongoDB ---
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error(err));
+// --- MongoDB Connection ---
+const start = Date.now();
+mongoose.set("debug", true);
+mongoose
+  .connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 5000,
+    maxPoolSize: 10,
+    minPoolSize: 2,
+    connectTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+  })
+  .then(() => console.log(`✅ MongoDB Connected in ${Date.now() - start}ms`))
+  .catch((err) => {
+    console.error("MongoDB connection error:", {
+      message: err.message,
+      name: err.name,
+      code: err.code,
+      stack: err.stack,
+    });
+    process.exit(1);
+  });
 
 // --- Start Server ---
 const PORT = process.env.PORT || 5000;

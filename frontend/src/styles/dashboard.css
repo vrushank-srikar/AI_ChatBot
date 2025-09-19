@@ -1,56 +1,252 @@
-/* Dashboard container */
+
+/* Main dashboard container */
 .dashboard {
   display: flex;
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
-  background: #e5ddd5; /* WhatsApp-like background */
+  background: #e5ddd5;
   font-family: "Segoe UI", Arial, sans-serif;
   padding: 20px;
   position: relative;
+  max-width: 1280px;
+  margin: 0 auto;
 }
 
-/* Product list */
-.product-list {
+/* Dashboard header */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   width: 100%;
-  max-width: 800px;
-  margin: 20px 0;
+  margin-bottom: 24px;
 }
 
-.product-list h3 {
+.dashboard-header h1 {
+  font-size: 30px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Cases navigation bar */
+.cases-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+.nav-tab {
+  background: #ffffff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  color: #374151;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.nav-tab:hover {
+  background: #f9fafb;
+}
+
+.nav-tab.active {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+/* Orders section */
+.orders-section {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.orders-section h2 {
   font-size: 24px;
-  color: #333;
-  margin-bottom: 15px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
 }
 
-.product-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 20px;
+.orders-card {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 16px;
 }
 
-.product-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 15px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s;
+.orders-table {
+  width: 100%;
+  border-collapse: collapse;
 }
 
-.product-card:hover {
-  transform: translateY(-5px);
+.orders-table thead {
+  background: #e5e7eb;
 }
 
-.product-card h4 {
-  font-size: 18px;
-  color: #007bff;
-  margin: 0 0 10px;
+.orders-table th {
+  padding: 12px;
+  text-align: left;
+  color: #374151;
+  font-weight: 500;
 }
 
-.product-card p {
-  margin: 5px 0;
-  font-size: 14px;
-  color: #555;
+.orders-table tr {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.orders-table tr:hover {
+  background: #f9fafb;
+}
+
+.orders-table td {
+  padding: 12px;
+  color: #374151;
+}
+
+.no-orders {
+  color: #4b5563;
+  padding: 16px;
+}
+
+/* Cases section */
+.cases-section {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.cases-section h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.cases-card {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+}
+
+.cases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.case-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.case-card:hover {
+  background: #f9fafb;
+}
+
+.case-card p {
+  margin: 8px 0;
+  color: #374151;
+}
+
+.no-cases {
+  color: #4b5563;
+  padding: 16px;
+}
+
+/* Case details section */
+.case-details {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 24px;
+}
+
+.case-details h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.case-details p {
+  margin: 8px 0;
+  color: #374151;
+}
+
+.responses-section h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.responses-list {
+  margin-bottom: 16px;
+}
+
+.responses-list p {
+  margin: 4px 0;
+  color: #374151;
+}
+
+.no-responses {
+  color: #4b5563;
+}
+
+.response-textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  resize: vertical;
+  outline: none;
+}
+
+.response-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.response-button {
+  background: #3b82f6;
+  color: white;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.response-button:hover {
+  background: #2563eb;
+}
+
+.status-section h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.status-select {
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  outline: none;
+}
+
+.status-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
 }
 
 /* Chatbot icon */
@@ -62,32 +258,34 @@
   color: white;
   border: none;
   border-radius: 50%;
-  width: 60px;
-  height: 60px;
-  font-size: 24px;
+  width: 80px;
+  height: 80px;
+  font-size: 32px;
   cursor: pointer;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.2s, background 0.2s;
 }
 
 .chatbot-icon:hover {
   background: #0056b3;
+  transform: scale(1.1);
 }
 
 /* Chat container */
 .chat-container {
   display: flex;
   flex-direction: column;
-  width: 800px;
+  width: 400px;
   height: 70vh;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   position: fixed;
-  bottom: 90px;
+  bottom: 110px;
   right: 20px;
   z-index: 900;
   transition: opacity 0.3s, transform 0.3s;
@@ -236,7 +434,7 @@
 .loading,
 .error-message {
   font-size: 18px;
-  color: #333;
+  color: #374151;
   text-align: center;
   margin-top: 20px;
 }
