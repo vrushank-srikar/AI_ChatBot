@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
-import "../styles/dashboard.css";
+import "../styles/UserDashboard.css";
 
 export default function UserDashboard() {
   const { id } = useParams();

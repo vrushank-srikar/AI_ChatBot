@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import "../styles/dashboard.css";
+import "../styles/AdminDashboard.css";
 
 export default function AdminDashboard() {
   const [token] = useState(localStorage.getItem("token") || "");

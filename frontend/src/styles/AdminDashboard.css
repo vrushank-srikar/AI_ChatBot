@@ -1,0 +1,225 @@
+/* Main dashboard container for admin */
+.admin-dashboard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  background: #e5ddd5;
+  font-family: "Segoe UI", Arial, sans-serif;
+  padding: 20px;
+  position: relative;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* Dashboard header */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.dashboard-header h1 {
+  font-size: 30px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+/* Cases navigation bar */
+.cases-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+.nav-tab {
+  background: #ffffff;
+  padding: 10px 20px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 500;
+  color: #374151;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.nav-tab:hover {
+  background: #f9fafb;
+}
+
+.nav-tab.active {
+  background: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+/* Cases section */
+.cases-section {
+  width: 100%;
+  margin-bottom: 32px;
+}
+
+.cases-section h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.cases-card {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 16px;
+}
+
+.cases-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.case-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.case-card:hover {
+  background: #f9fafb;
+}
+
+.case-card p {
+  margin: 8px 0;
+  color: #374151;
+}
+
+.no-cases {
+  color: #4b5563;
+  padding: 16px;
+}
+
+/* Case details section */
+.case-details {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 24px;
+}
+
+.case-details h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.case-details p {
+  margin: 8px 0;
+  color: #374151;
+}
+
+.responses-section h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.responses-list {
+  border: #0056b3 2px solid;
+  margin-bottom: 16px;
+}
+
+.responses-list p {
+  margin: 4px 0;
+  color: #374151;
+}
+
+.no-responses {
+  color: #4b5563;
+}
+
+.response-textarea {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  resize: vertical;
+  outline: none;
+}
+
+.response-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+.response-button {
+  background: #3b82f6;
+  color: white;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.response-button:hover {
+  background: #2563eb;
+}
+
+.status-section h3 {
+  font-size: 20px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.status-select {
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  outline: none;
+}
+
+.status-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+}
+
+/* Logout button */
+.logout-btn {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  padding: 8px 16px;
+  background: #ff4d4f;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  z-index: 1000;
+}
+
+.logout-btn:hover {
+  background: #cc0000;
+}
+
+/* Loading and error states */
+.loading,
+.error-message {
+  font-size: 18px;
+  color: #374151;
+  text-align: center;
+  margin-top: 20px;
+}
