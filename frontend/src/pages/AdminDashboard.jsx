@@ -1,50 +1,49 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import "../styles/AdminDashboard.css";
 
 export default function AdminDashboard() {
   const [token] = useState(localStorage.getItem("token") || "");
-  const [setOrders] = useState([]);
   const [allCases, setAllCases] = useState([]);
   const [selectedCase, setSelectedCase] = useState(null);
   const [responseMessage, setResponseMessage] = useState("");
-  const [setError] = useState("");
-  const [setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("new"); // New, Pending, or Closed
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [activeTab, setActiveTab] = useState("new");
 
-  // Fetch all orders
-  const fetchOrders = async () => {
+  // Fetch all cases with retry
+  const fetchCases = useCallback(async (retryCount = 0) => {
     setLoading(true);
+    setError("");
     try {
-      const response = await axios.get("http://localhost:5000/api/admin/orders", {
+      const response = await axios.get(`http://localhost:5000/api/admin/cases?_t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setOrders(response.data.orders);
+      const cases = response.data.cases || [];
+      const sortedCases = cases.sort((a, b) => {
+        if (a.priority === "high" && b.priority !== "high") return -1;
+        if (a.priority !== "high" && b.priority === "high") return 1;
+        return new Date(b.createdAt) - new Date(a.createdAt);
+      });
+      setAllCases(sortedCases);
     } catch (err) {
-      setError(err.response?.data?.error || "Failed to fetch orders");
+      if (retryCount < 2) {
+        console.warn(`Retrying fetchCases, attempt ${retryCount + 1}`);
+        setTimeout(() => fetchCases(retryCount + 1), 1000);
+      } else {
+        setError(err.response?.data?.error || "Failed to fetch cases");
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [token]);
 
-  // Fetch all cases
-  const fetchCases = async () => {
-    setLoading(true);
-    try {
-      const response = await axios.get("http://localhost:5000/api/admin/cases", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setAllCases(response.data.cases);
-    } catch (err) {
-      setError(err.response?.data?.error || "Failed to fetch cases");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Update case status
+  // Update case status (toggle switch)
   const updateCaseStatus = async (caseId, newStatus) => {
     setLoading(true);
+    setError("");
+    setSuccessMessage("");
     try {
       const response = await axios.put(
         `http://localhost:5000/api/case/${caseId}`,
@@ -55,6 +54,8 @@ export default function AdminDashboard() {
       if (selectedCase?._id === caseId) {
         setSelectedCase(response.data.case);
       }
+      setSuccessMessage(`Case ${newStatus === "resolved" ? "closed" : "reopened"} successfully`);
+      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err) {
       setError(err.response?.data?.error || "Failed to update case status");
     } finally {
@@ -69,6 +70,8 @@ export default function AdminDashboard() {
       return;
     }
     setLoading(true);
+    setError("");
+    setSuccessMessage("");
     try {
       const response = await axios.post(
         `http://localhost:5000/api/case/${caseId}/response`,
@@ -80,6 +83,8 @@ export default function AdminDashboard() {
         setSelectedCase(response.data.case);
       }
       setResponseMessage("");
+      setSuccessMessage("Response sent successfully");
+      setTimeout(() => setSuccessMessage(""), 3000);
     } catch (err) {
       setError(err.response?.data?.error || "Failed to add response");
     } finally {
@@ -87,9 +92,10 @@ export default function AdminDashboard() {
     }
   };
 
-
   // Logout
   const handleLogout = async () => {
+    setLoading(true);
+    setError("");
     try {
       await axios.post(
         "http://localhost:5000/api/logout",
@@ -100,30 +106,47 @@ export default function AdminDashboard() {
       window.location.href = "/";
     } catch (err) {
       setError(err.response?.data?.error || "Logout failed");
+    } finally {
+      setLoading(false);
     }
   };
 
   // Fetch data on mount if token exists
   useEffect(() => {
     if (token) {
-      fetchOrders();
       fetchCases();
     } else {
-      window.location.href = "/"; // Redirect to login if no token
+      setError("No authentication token found. Please log in.");
+      window.location.href = "/";
     }
-  }, [token]);
+  }, [token, fetchCases]);
 
   // Categorize cases
-  const newCases = allCases.filter((c) => c.responses.length === 0);
+  const newCases = allCases.filter(
+    (c) => !c.responses.some((r) => r.adminId !== null)
+  );
   const pendingCases = allCases.filter(
-    (c) => c.responses.length > 0 && (c.status === "open" || c.status === "in-progress")
+    (c) => c.responses.some((r) => r.adminId !== null) && c.status !== "resolved"
   );
   const closedCases = allCases.filter((c) => c.status === "resolved");
+
   const displayedCases =
-    activeTab === "new" ? newCases : activeTab === "pending" ? pendingCases : closedCases;
+    activeTab === "new"
+      ? newCases
+      : activeTab === "pending"
+      ? pendingCases
+      : closedCases;
+
+  // Handle key press for sending response
+  const handleKeyPress = (e, caseId) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      addResponse(caseId);
+    }
+  };
 
   return (
-    <div className="dashboard">
+    <div className="admin-dashboard">
       <div className="dashboard-header">
         <h1>Admin Dashboard</h1>
         <button onClick={handleLogout} className="logout-btn">
@@ -131,158 +154,126 @@ export default function AdminDashboard() {
         </button>
       </div>
 
+      {loading && <div className="loading">Loading...</div>}
+      {error && <div className="error-message">{error}</div>}
+      {successMessage && <div className="success-message">{successMessage}</div>}
 
-      {/* Navigation Bar */}
       <div className="cases-nav">
         <button
           className={`nav-tab ${activeTab === "new" ? "active" : ""}`}
           onClick={() => setActiveTab("new")}
         >
-          New Cases ({newCases.length})
+          New ({newCases.length})
         </button>
         <button
           className={`nav-tab ${activeTab === "pending" ? "active" : ""}`}
           onClick={() => setActiveTab("pending")}
         >
-          Pending Cases ({pendingCases.length})
+          Pending ({pendingCases.length})
         </button>
         <button
           className={`nav-tab ${activeTab === "closed" ? "active" : ""}`}
           onClick={() => setActiveTab("closed")}
         >
-          Closed Cases ({closedCases.length})
+          Closed ({closedCases.length})
         </button>
       </div>
 
-    
-
-      {/* Cases Section */}
       <div className="cases-section">
-        <h2>
-          {activeTab === "new" ? "New Cases" : activeTab === "pending" ? "Pending Cases" : "Closed Cases"}
-        </h2>
-        <div className="cases-card">
+        <h2>{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Cases</h2>
+        <div className="cases-list">
           {displayedCases.length === 0 ? (
             <p className="no-cases">
-              No {activeTab === "new" ? "new" : activeTab === "pending" ? "pending" : "closed"} cases found.
+              No {activeTab} cases found.
             </p>
           ) : (
-            <div className="cases-list">
-              {displayedCases.map((c) => (
-                <div
-                  key={c._id}
-                  className="case-card"
-                  onClick={() => setSelectedCase(c)}
-                >
-                  <p>
-                    <strong>Case ID:</strong> {c._id}
-                  </p>
-                  <p>
-                    <strong>User:</strong> {c.userId.name} ({c.userId.email})
-                  </p>
-                  <p>
-                    <strong>Order ID:</strong> {c.orderId}
-                  </p>
-                  <p>
-                    <strong>Product Index:</strong> {c.productIndex}
-                  </p>
-                  <p>
-                    <strong>Description:</strong> {c.description}
-                  </p>
-                  <p>
-                    <strong>Status:</strong> {c.status}
-                  </p>
-                  <p>
-                    <strong>Created:</strong> {new Date(c.createdAt).toLocaleString()}
-                  </p>
-                </div>
-              ))}
-            </div>
+            displayedCases.map((c) => (
+              <div
+                key={c._id}
+                className={`case-card ${c.priority === "high" ? "high-priority" : ""}`}
+                onClick={() => setSelectedCase(c)}
+              >
+                <p><strong>Case ID:</strong> {c._id.slice(-6)}</p>
+                <p><strong>User:</strong> {c.userId?.name || "Unknown"}</p>
+                <p><strong>Description:</strong> {c.description}</p>
+                <p><strong>Priority:</strong> {c.priority}</p>
+              </div>
+            ))
           )}
         </div>
       </div>
 
-      {/* Case Details and Actions */}
       {selectedCase && (
-        <div className="case-details">
-          <h2>Case Details</h2>
-          <p>
-            <strong>Case ID:</strong> {selectedCase._id}
-          </p>
-          <p>
-            <strong>User:</strong> {selectedCase.userId.name} ({selectedCase.userId.email})
-          </p>
-          <p>
-            <strong>Order ID:</strong> {selectedCase.orderId}
-          </p>
-          <p>
-            <strong>Product Index:</strong> {selectedCase.productIndex}
-          </p>
-          <p>
-            <strong>Description:</strong> {selectedCase.description}
-          </p>
-          <p>
-            <strong>Status:</strong> {selectedCase.status}
-          </p>
-          <p>
-            <strong>Created:</strong> {new Date(selectedCase.createdAt).toLocaleString()}
-          </p>
-
-          {/* Case Responses */}
-          <div className="responses-section">
-            <h3>Responses</h3>
-            {selectedCase.responses.length === 0 ? (
-              <p className="no-responses">No responses yet.</p>
-            ) : (
-              <div className="responses-list">
-                {selectedCase.responses.map((r, i) => (
-                  <p key={i}>
-                    <strong>
-                      {r.adminId?.name || "Admin"} (
-                      {new Date(r.timestamp).toLocaleString()}):
-                    </strong>{" "}
-                    {r.message}
-                  </p>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Add Response */}
-          <div className="mt-4">
-            <textarea
-              value={responseMessage}
-              onChange={(e) => setResponseMessage(e.target.value)}
-              placeholder="Add a response..."
-              className="response-textarea"
-            />
-            <button
-              onClick={() => addResponse(selectedCase._id)}
-              className="response-button"
-            >
-              Add Response
-            </button>
-          </div>
-
-          {/* Update Status */}
-          <div className="status-section">
-            <h3>Update Status</h3>
-            <select
-              onChange={(e) => updateCaseStatus(selectedCase._id, e.target.value)}
-              value={selectedCase.status}
-              className="status-select"
-            >
-              <option value="open">Open</option>
-              <option value="in-progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-            </select>
+        <div className="case-popup">
+          <div className="case-popup-content">
+            <div className="case-popup-header">
+              <h3>Case #{selectedCase._id.slice(-6)}</h3>
+              <button className="close-popup" onClick={() => setSelectedCase(null)}>
+                &times;
+              </button>
+            </div>
+            <div className="case-details">
+              <p><strong>User:</strong> {selectedCase.userId?.name || "Unknown"} ({selectedCase.userId?.email || "N/A"})</p>
+              <p><strong>Order ID:</strong> {selectedCase.orderId}</p>
+              <p><strong>Product Index:</strong> {selectedCase.productIndex}</p>
+              <p><strong>Description:</strong> {selectedCase.description}</p>
+              <p><strong>Priority:</strong> {selectedCase.priority}</p>
+              <p><strong>Status:</strong> {selectedCase.status}</p>
+              <p><strong>Created:</strong> {new Date(selectedCase.createdAt).toLocaleString()}</p>
+              <p><strong>Updated:</strong> {new Date(selectedCase.updatedAt).toLocaleString()}</p>
+            </div>
+            <div className="chat-history">
+              {selectedCase.responses.length === 0 ? (
+                <p>No chat history available.</p>
+              ) : (
+                selectedCase.responses.map((r, i) => (
+                  <div
+                    key={i}
+                    className={r.adminId ? "admin-message" : "user-message"}
+                  >
+                    <p>
+                      <strong>{r.adminId?.name || "System"}</strong> ({new Date(r.timestamp).toLocaleString()}):
+                      <br />
+                      {r.message}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="response-section">
+              <textarea
+                value={responseMessage}
+                onChange={(e) => setResponseMessage(e.target.value)}
+                onKeyPress={(e) => handleKeyPress(e, selectedCase._id)}
+                placeholder="Type your response..."
+                className="response-textarea"
+              />
+              <button
+                onClick={() => addResponse(selectedCase._id)}
+                className="response-button"
+              >
+                Send
+              </button>
+            </div>
+            <div className="status-toggle">
+              <label>
+                Case Status:
+                <input
+                  type="checkbox"
+                  checked={selectedCase.status === "resolved"}
+                  onChange={() =>
+                    updateCaseStatus(
+                      selectedCase._id,
+                      selectedCase.status === "resolved" ? "open" : "resolved"
+                    )
+                  }
+                />
+                <span className="toggle-switch"></span>
+              </label>
+            </div>
           </div>
         </div>
       )}
-
-
-      
-        
     </div>
   );
 }

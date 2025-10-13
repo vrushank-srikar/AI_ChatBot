@@ -1,18 +1,15 @@
-/* Main dashboard container for admin */
 .admin-dashboard {
   display: flex;
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
-  background: #e5ddd5;
-  font-family: "Segoe UI", Arial, sans-serif;
-  padding: 20px;
-  position: relative;
-  max-width: 1280px;
+  background: #f9fafb;
+  font-family: "Inter", sans-serif;
+  padding: 24px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
-/* Dashboard header */
 .dashboard-header {
   display: flex;
   justify-content: space-between;
@@ -22,204 +19,324 @@
 }
 
 .dashboard-header h1 {
-  font-size: 30px;
-  font-weight: 700;
-  color: #1f2937;
+  font-size: 28px;
+  font-weight: 600;
+  color: #111827;
 }
 
-/* Cases navigation bar */
+.logout-btn {
+  padding: 10px 20px;
+  background: #ef4444;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.logout-btn:hover {
+  background: #dc2626;
+  transform: translateY(-1px);
+}
+
 .cases-nav {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   margin-bottom: 24px;
-  width: 100%;
 }
 
 .nav-tab {
-  background: #ffffff;
   padding: 10px 20px;
-  border-radius: 6px;
-  border: 1px solid #d1d5db;
-  cursor: pointer;
-  font-size: 16px;
+  background: #e5e7eb;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
   font-weight: 500;
   color: #374151;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.nav-tab:hover {
-  background: #f9fafb;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease;
 }
 
 .nav-tab.active {
-  background: #007bff;
+  background: #3b82f6;
   color: white;
-  border-color: #007bff;
 }
 
-/* Cases section */
+.nav-tab:hover {
+  background: #d1d5db;
+  transform: translateY(-1px);
+}
+
+.nav-tab.active:hover {
+  background: #2563eb;
+}
+
 .cases-section {
   width: 100%;
-  margin-bottom: 32px;
 }
 
 .cases-section h2 {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
-  color: #374151;
+  color: #111827;
   margin-bottom: 16px;
 }
 
-.cases-card {
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  padding: 16px;
-}
-
 .cases-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
   gap: 16px;
 }
 
 .case-card {
-  background: #ffffff;
+  background: white;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   padding: 16px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.case-card.high-priority {
+  border-left: 4px solid #ef4444;
 }
 
 .case-card:hover {
-  background: #f9fafb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
 }
 
 .case-card p {
-  margin: 8px 0;
-  color: #374151;
-}
-
-.no-cases {
+  margin: 6px 0;
+  font-size: 14px;
   color: #4b5563;
-  padding: 16px;
 }
 
-/* Case details section */
-.case-details {
-  background: #ffffff;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  padding: 24px;
+.case-card p strong {
+  color: #111827;
+  font-weight: 500;
 }
 
-.case-details h2 {
-  font-size: 24px;
+.case-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.case-popup-content {
+  background: white;
+  width: 90%;
+  max-width: 500px;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
+}
+
+.case-popup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #3b82f6;
+  color: white;
+}
+
+.case-popup-header h3 {
+  margin: 0;
+  font-size: 16px;
   font-weight: 600;
-  color: #374151;
-  margin-bottom: 16px;
+}
+
+.close-popup {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.case-details {
+  padding: 16px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .case-details p {
-  margin: 8px 0;
-  color: #374151;
-}
-
-.responses-section h3 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 8px;
-}
-
-.responses-list {
-  border: #0056b3 2px solid;
-  margin-bottom: 16px;
-}
-
-.responses-list p {
-  margin: 4px 0;
-  color: #374151;
-}
-
-.no-responses {
+  margin: 6px 0;
+  font-size: 14px;
   color: #4b5563;
 }
 
-.response-textarea {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  margin-bottom: 8px;
-  resize: vertical;
-  outline: none;
+.case-details p strong {
+  color: #111827;
+  font-weight: 500;
 }
 
-.response-textarea:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
+.chat-history {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: #f9fafb;
+}
+
+.chat-history p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.user-message {
+  margin-bottom: 12px;
+  text-align: left;
+}
+
+.user-message p {
+  background: #e5e7eb;
+  padding: 8px 12px;
+  border-radius: 12px 12px 12px 4px;
+  display: inline-block;
+  max-width: 80%;
+}
+
+.admin-message {
+  margin-bottom: 12px;
+  text-align: right;
+}
+
+.admin-message p {
+  background: #3b82f6;
+  color: white;
+  padding: 8px 12px;
+  border-radius: 12px 12px 4px 12px;
+  display: inline-block;
+  max-width: 80%;
+}
+
+.response-section {
+  display: flex;
+  padding: 12px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.response-textarea {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  resize: none;
+  height: 60px;
 }
 
 .response-button {
+  padding: 8px 16px;
   background: #3b82f6;
   color: white;
-  padding: 8px 16px;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
+  margin-left: 8px;
   cursor: pointer;
-  font-weight: 500;
+  font-size: 14px;
 }
 
 .response-button:hover {
   background: #2563eb;
 }
 
-.status-section h3 {
-  font-size: 20px;
-  font-weight: 600;
-  color: #374151;
-  margin-bottom: 8px;
+.status-toggle {
+  padding: 12px 16px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
 }
 
-.status-select {
-  padding: 8px;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  outline: none;
-}
-
-.status-select:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5);
-}
-
-/* Logout button */
-.logout-btn {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  padding: 8px 16px;
-  background: #ff4d4f;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
+.status-toggle label {
+  display: flex;
+  align-items: center;
   font-size: 14px;
-  font-weight: bold;
-  z-index: 1000;
+  color: #111827;
+  font-weight: 500;
 }
 
-.logout-btn:hover {
-  background: #cc0000;
+.status-toggle input {
+  display: none;
 }
 
-/* Loading and error states */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.toggle-switch::before {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s ease;
+}
+
+.status-toggle input:checked + .toggle-switch {
+  background: #3b82f6;
+}
+
+.status-toggle input:checked + .toggle-switch::before {
+  transform: translateX(20px);
+}
+
 .loading,
-.error-message {
-  font-size: 18px;
-  color: #374151;
+.error-message,
+.success-message {
+  font-size: 14px;
   text-align: center;
-  margin-top: 20px;
+  margin: 16px 0;
+}
+
+.loading {
+  color: #4b5563;
+}
+
+.error-message {
+  color: #ef4444;
+}
+
+.success-message {
+  color: #10b981;
+}
+
+@media (max-width: 600px) {
+  .admin-dashboard {
+    padding: 16px;
+  }
+
+  .dashboard-header h1 {
+    font-size: 24px;
+  }
+
+  .cases-list {
+    grid-template-columns: 1fr;
+  }
+
+  .case-popup-content {
+    width: 95%;
+  }
 }
