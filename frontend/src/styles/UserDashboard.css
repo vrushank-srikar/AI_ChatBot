@@ -545,3 +545,27 @@
     max-width: 85%;
   }
 }
+.faq-list {
+  padding: 20px;
+  text-align: center;
+}
+
+.faq-list h4 {
+  margin-bottom: 15px;
+  font-size: 1.2em;
+  color: #333;
+}
+
+.faq-item {
+  background-color: #f0f4f8;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 10px;
+  margin: 10px 0;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.faq-item:hover {
+  background-color: #e0e7ff;
+}

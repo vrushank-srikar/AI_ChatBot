@@ -17,6 +17,30 @@ export default function UserDashboard() {
   const navigate = useNavigate();
   const chatBoxRef = useRef(null);
 
+  // Define FAQs with default answers
+  const faqs = [
+    {
+      id: "faq1",
+      question: "When will I receive my order?",
+      defaultAnswer: "The usual delivery time is around 3-5 business days, depending on your location and the product's availability.",
+    },
+    {
+      id: "faq2",
+      question: "How can I return my product?",
+      defaultAnswer: "You can return your product within 30 days of receipt by initiating a return request through our support system.",
+    },
+    {
+      id: "faq3",
+      question: "Can I cancel my order?",
+      defaultAnswer: "Orders can be canceled before they are shipped. Please contact support to check if cancellation is possible.",
+    },
+    {
+      id: "faq4",
+      question: "What is the status of my order?",
+      defaultAnswer: "You can check your order status in the 'Your Ordered Products' section or contact support for real-time updates.",
+    },
+  ];
+
   // Fetch user cases with cache busting
   const fetchUserCases = useCallback(async () => {
     if (!id) return;
@@ -115,17 +139,34 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle sending chat message
-  const handleSend = async () => {
-    if (!input.trim() || !selectedProduct) return;
+  // Handle sending chat message (used for both user input and FAQ clicks)
+  const handleSend = async (faqQuestion = null, faqAnswer = null) => {
+    const messageToSend = faqQuestion || input.trim();
+    if (!messageToSend || !selectedProduct) return;
 
+    // Add user message
     const userMsg = {
-      text: input,
+      text: messageToSend,
       sender: "user",
       senderName: user?.name || "User",
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
+
+    // If FAQ, add default answer and skip backend call
+    if (faqQuestion && faqAnswer) {
+      const botMsg = {
+        text: faqAnswer,
+        sender: "bot",
+        senderName: "Support Bot",
+        timestamp: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, botMsg]);
+      setLoading(false);
+      return;
+    }
+
+    // Handle non-FAQ messages with backend API
     setLoading(true);
     setError(null);
 
@@ -139,7 +180,7 @@ export default function UserDashboard() {
 
       const res = await axios.post(
         "http://localhost:5000/api/chat",
-        { message: input },
+        { message: messageToSend },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -159,8 +200,13 @@ export default function UserDashboard() {
       setError(err.response?.data?.error || "Failed to send message.");
     } finally {
       setLoading(false);
-      setInput("");
+      setInput(""); // Clear input for non-FAQ messages
     }
+  };
+
+  // Handle FAQ click
+  const handleFaqClick = (faq) => {
+    handleSend(faq.question, faq.defaultAnswer);
   };
 
   // Handle closing chat
@@ -323,7 +369,7 @@ export default function UserDashboard() {
                   {caseItem.responses.length > 0 ? (
                     caseItem.responses.map((response, index) => (
                       <div key={index} className="admin-msg">
-                        {/* <div className="sender-info">{response.adminId?.name || "System"}</div> */}
+                        <div className="sender-info">{response.adminId?.name || "System"}</div>
                         <div className="message-text">
                           <ReactMarkdown>{response.message}</ReactMarkdown>
                         </div>
@@ -356,15 +402,32 @@ export default function UserDashboard() {
           </button>
         </div>
         <div className="chat-box" ref={chatBoxRef}>
-          {messages.map((msg, index) => (
-            <div key={index} className={msg.sender === "user" ? "user-msg" : "bot-msg"}>
-              <div className="sender-info">{msg.senderName}</div>
-              <div className="message-text">
-                <ReactMarkdown>{msg.text}</ReactMarkdown>
-              </div>
-              <div className="timestamp">{new Date(msg.timestamp).toLocaleString()}</div>
+          {messages.length === 0 && isChatOpen ? (
+            <div className="faq-list">
+              <h4>Frequently Asked Questions</h4>
+              {faqs.map((faq) => (
+                <div
+                  key={faq.id}
+                  className="faq-item"
+                  onClick={() => handleFaqClick(faq)}
+                  role="button"
+                  aria-label={`Show answer for ${faq.question}`}
+                >
+                  <div className="faq-question">{faq.question}</div>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : (
+            messages.map((msg, index) => (
+              <div key={index} className={msg.sender === "user" ? "user-msg" : "bot-msg"}>
+                <div className="sender-info">{msg.senderName}</div>
+                <div className="message-text">
+                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                </div>
+                <div className="timestamp">{new Date(msg.timestamp).toLocaleString()}</div>
+              </div>
+            ))
+          )}
         </div>
         <div className="chat-input">
           <input
@@ -375,7 +438,7 @@ export default function UserDashboard() {
             placeholder="Type your message..."
             disabled={loading}
           />
-          <button onClick={handleSend} disabled={loading}>
+          <button onClick={() => handleSend()} disabled={loading}>
             <svg
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
