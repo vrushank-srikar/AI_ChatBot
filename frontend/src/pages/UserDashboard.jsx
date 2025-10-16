@@ -10,48 +10,36 @@ export default function UserDashboard() {
   const [input, setInput] = useState("");
   const [user, setUser] = useState(null);
   const [userCases, setUserCases] = useState([]);
+  const [faqs, setFaqs] = useState([]);
   const [error, setError] = useState(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedDomain, setSelectedDomain] = useState(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const chatBoxRef = useRef(null);
 
-  // Define FAQs with default answers
-  const faqs = [
-    {
-      id: "faq1",
-      question: "When will I receive my order?",
-      defaultAnswer: "The usual delivery time is around 3-5 business days, depending on your location and the product's availability.",
-    },
-    {
-      id: "faq2",
-      question: "How can I return my product?",
-      defaultAnswer: "You can return your product within 30 days of receipt by initiating a return request through our support system.",
-    },
-    {
-      id: "faq3",
-      question: "Can I cancel my order?",
-      defaultAnswer: "Orders can be canceled before they are shipped. Please contact support to check if cancellation is possible.",
-    },
-    {
-      id: "faq4",
-      question: "What is the status of my order?",
-      defaultAnswer: "You can check your order status in the 'Your Ordered Products' section or contact support for real-time updates.",
-    },
+  // Define domains for display
+  const domains = [
+    { name: "E-commerce", icon: "🛒", description: "Manage your online shopping orders and support cases." },
+    { name: "Travel", icon: "✈️", description: "Track travel bookings and resolve travel-related issues." },
+    { name: "Telecommunications", icon: "📱", description: "Handle mobile plans, billing, and service queries." },
+    { name: "Banking Services", icon: "🏦", description: "Monitor accounts, transactions, and banking support." },
   ];
 
   // Fetch user cases with cache busting
   const fetchUserCases = useCallback(async () => {
-    if (!id) return;
+    if (!id || !selectedDomain) return;
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("token");
-      const res = await axios.get(`http://localhost:5000/api/user/${id}/cases?_t=${Date.now()}`, {
+      console.log(`Fetching cases for user ${id}, domain: ${selectedDomain}`);
+      const res = await axios.get(`http://localhost:5000/api/user/${id}/cases?domain=${selectedDomain}&_t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUserCases(res.data.cases || []);
+      console.log(`Found ${res.data.cases.length} cases`);
       setError(null);
     } catch (err) {
       console.error("Failed to fetch user cases:", err);
@@ -59,7 +47,31 @@ export default function UserDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, selectedDomain]);
+
+  // Fetch FAQs when domain is selected
+  const fetchFaqs = useCallback(async () => {
+    if (!selectedDomain) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem("token");
+      console.log(`Fetching FAQs for domain: ${selectedDomain}`);
+      if (!token) {
+        throw new Error("No authentication token found");
+      }
+      const res = await axios.get(`http://localhost:5000/api/faqs/${selectedDomain}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      console.log("FAQ response:", res.data);
+      setFaqs(res.data.faqs || []);
+    } catch (err) {
+      console.error("Failed to fetch FAQs:", err);
+      setError(err.response?.data?.error || `Failed to load FAQs for ${selectedDomain}.`);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDomain]);
 
   // Fetch user data on mount
   useEffect(() => {
@@ -87,6 +99,7 @@ export default function UserDashboard() {
         clearTimeout(timeout);
         if (res.data) {
           setUser(res.data);
+          console.log("User data fetched:", res.data);
         } else {
           setError("No user data returned from the server.");
         }
@@ -106,8 +119,16 @@ export default function UserDashboard() {
       }
     };
     fetchUser();
-    fetchUserCases();
-  }, [id, navigate, fetchUserCases]);
+  }, [id, navigate]);
+
+  // Fetch cases and FAQs when domain is selected
+  useEffect(() => {
+    if (selectedDomain) {
+      console.log(`Selected domain changed to: ${selectedDomain}`);
+      fetchUserCases();
+      fetchFaqs();
+    }
+  }, [selectedDomain, fetchUserCases, fetchFaqs]);
 
   // Scroll chat to bottom when messages update
   useEffect(() => {
@@ -116,12 +137,23 @@ export default function UserDashboard() {
     }
   }, [messages, isChatOpen]);
 
+  // Handle domain selection
+  const handleDomainClick = (domain) => {
+    setSelectedDomain(domain.name);
+    setSelectedProduct(null);
+    setIsChatOpen(false);
+    setMessages([]);
+    setFaqs([]); // Clear FAQs when changing domains
+    console.log(`Domain selected: ${domain.name}`);
+  };
+
   // Handle product selection
   const handleProductClick = async (product) => {
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("token");
+      console.log(`Selecting product: ${product.name}`);
       await axios.post(
         "http://localhost:5000/api/select-product",
         { orderId: product.orderId, productIndex: product.productIndex },
@@ -206,7 +238,8 @@ export default function UserDashboard() {
 
   // Handle FAQ click
   const handleFaqClick = (faq) => {
-    handleSend(faq.question, faq.defaultAnswer);
+    console.log(`FAQ clicked: ${faq.question}`);
+    handleSend(faq.question, faq.answer);
   };
 
   // Handle closing chat
@@ -291,7 +324,7 @@ export default function UserDashboard() {
       status: order.status,
       productIndex: index,
     }))
-  );
+  ).filter((product) => !selectedDomain || product.domain === selectedDomain);
 
   return (
     <div className="user-dashboard">
@@ -300,97 +333,118 @@ export default function UserDashboard() {
       </button>
       <h2>Welcome, {user.name}</h2>
 
-      <div className="product-list">
-        <h3>Your Ordered Products</h3>
-        {loading && <div className="loading">Loading...</div>}
-        {allProducts.length > 0 ? (
-          <div className="product-grid">
-            {allProducts.map((product, index) => {
-              const hasCase = userCases.some(
-                (c) => c.orderId === product.orderId && c.productIndex === product.productIndex
-              );
-              const isSelected =
-                selectedProduct &&
-                selectedProduct.orderId === product.orderId &&
-                selectedProduct.productIndex === product.productIndex;
-              return (
-                <div
-                  key={index}
-                  className={`product-card ${isSelected ? "selected" : ""}`}
-                  onClick={() => handleProductClick(product)}
-                >
-                  <h4>{product.name}</h4>
-                  <p>Quantity: {product.quantity}</p>
-                  <p>Price: ₹{product.price}</p>
-                  <p>Order ID: {product.orderId}</p>
-                  <p>Order Date: {new Date(product.orderDate).toLocaleDateString()}</p>
-                  <p>Status: {product.status}</p>
-                  {hasCase && <span className="ticket-badge">Ticket Created</span>}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p>No products ordered yet.</p>
-        )}
+      <div className="domain-section">
+        <h3>Your Domains</h3>
+        <div className="domain-grid">
+          {domains.map((domain, index) => (
+            <div
+              key={index}
+              className={`domain-card ${selectedDomain === domain.name ? "selected" : ""}`}
+              onClick={() => handleDomainClick(domain)}
+            >
+              <span className="domain-icon">{domain.icon}</span>
+              <h4>{domain.name}</h4>
+              <p>{domain.description}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <div className="cases-section">
-        <h3>Your Cases</h3>
-        {loading && <div className="loading">Loading...</div>}
-        {userCases.length > 0 ? (
-          <div className="cases-list">
-            {userCases.map((caseItem) => (
-              <div key={caseItem._id} className="case-card">
-                <h4>Case ID: {caseItem._id}</h4>
-                <p>
-                  <strong>Order ID:</strong> {caseItem.orderId}
-                </p>
-                <p>
-                  <strong>Product Index:</strong> {caseItem.productIndex}
-                </p>
-                <p>
-                  <strong>Description:</strong> {caseItem.description}
-                </p>
-                <p>
-                  <strong>Priority:</strong> {caseItem.priority}
-                </p>
-                <p>
-                  <strong>Status:</strong> {caseItem.status}
-                </p>
-                <p>
-                  <strong>Created:</strong> {new Date(caseItem.createdAt).toLocaleString()}
-                </p>
-                <p>
-                  <strong>Updated:</strong> {new Date(caseItem.updatedAt).toLocaleString()}
-                </p>
-                <h5>Responses:</h5>
-                <div className="response">
-                  {caseItem.responses.length > 0 ? (
-                    caseItem.responses.map((response, index) => (
-                      <div key={index} className="admin-msg">
-                        <div className="sender-info">{response.adminId?.name || "System"}</div>
-                        <div className="message-text">
-                          <ReactMarkdown>{response.message}</ReactMarkdown>
-                        </div>
-                        <div className="timestamp">
-                          {new Date(response.timestamp).toLocaleString()}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p>
-                      <small>No responses yet.</small>
-                    </p>
-                  )}
-                </div>
+      {selectedDomain && (
+        <>
+          <div className="product-list">
+            <h3>{selectedDomain} Products</h3>
+            {loading && <div className="loading">Loading...</div>}
+            {allProducts.length > 0 ? (
+              <div className="product-grid">
+                {allProducts.map((product, index) => {
+                  const hasCase = userCases.some(
+                    (c) => c.orderId === product.orderId && c.productIndex === product.productIndex
+                  );
+                  const isSelected =
+                    selectedProduct &&
+                    selectedProduct.orderId === product.orderId &&
+                    selectedProduct.productIndex === product.productIndex;
+                  return (
+                    <div
+                      key={index}
+                      className={`product-card ${isSelected ? "selected" : ""}`}
+                      onClick={() => handleProductClick(product)}
+                    >
+                      <h4>{product.name}</h4>
+                      <p>Quantity: {product.quantity}</p>
+                      <p>Price: ₹{product.price}</p>
+                      <p>Order ID: {product.orderId}</p>
+                      <p>Order Date: {new Date(product.orderDate).toLocaleDateString()}</p>
+                      <p>Status: {product.status}</p>
+                      {hasCase && <span className="ticket-badge">Ticket Created</span>}
+                    </div>
+                  );
+                })}
               </div>
-            ))}
+            ) : (
+              <p>No products ordered in {selectedDomain} yet.</p>
+            )}
           </div>
-        ) : (
-          <p>No cases found.</p>
-        )}
-      </div>
+
+          <div className="cases-section">
+            <h3>Your {selectedDomain} Cases</h3>
+            {loading && <div className="loading">Loading...</div>}
+            {userCases.length > 0 ? (
+              <div className="cases-list">
+                {userCases.map((caseItem) => (
+                  <div key={caseItem._id} className="case-card">
+                    <h4>Case ID: {caseItem._id}</h4>
+                    <p>
+                      <strong>Order ID:</strong> {caseItem.orderId}
+                    </p>
+                    <p>
+                      <strong>Product Index:</strong> {caseItem.productIndex}
+                    </p>
+                    <p>
+                      <strong>Description:</strong> {caseItem.description}
+                    </p>
+                    <p>
+                      <strong>Priority:</strong> {caseItem.priority}
+                    </p>
+                    <p>
+                      <strong>Status:</strong> {caseItem.status}
+                    </p>
+                    <p>
+                      <strong>Created:</strong> {new Date(caseItem.createdAt).toLocaleString()}
+                    </p>
+                    <p>
+                      <strong>Updated:</strong> {new Date(caseItem.updatedAt).toLocaleString()}
+                    </p>
+                    <h5>Responses:</h5>
+                    <div className="response">
+                      {caseItem.responses.length > 0 ? (
+                        caseItem.responses.map((response, index) => (
+                          <div key={index} className="admin-msg">
+                            <div className="sender-info">{response.adminId?.name || "System"}</div>
+                            <div className="message-text">
+                              <ReactMarkdown>{response.message}</ReactMarkdown>
+                            </div>
+                            <div className="timestamp">
+                              {new Date(response.timestamp).toLocaleString()}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <p>
+                          <small>No responses yet.</small>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p>No cases found for {selectedDomain}.</p>
+            )}
+          </div>
+        </>
+      )}
 
       <div className={`chat-container ${isChatOpen ? "open" : "closed"}`}>
         <div className="chat-header">
@@ -405,17 +459,22 @@ export default function UserDashboard() {
           {messages.length === 0 && isChatOpen ? (
             <div className="faq-list">
               <h4>Frequently Asked Questions</h4>
-              {faqs.map((faq) => (
-                <div
-                  key={faq.id}
-                  className="faq-item"
-                  onClick={() => handleFaqClick(faq)}
-                  role="button"
-                  aria-label={`Show answer for ${faq.question}`}
-                >
-                  <div className="faq-question">{faq.question}</div>
-                </div>
-              ))}
+              {loading && <div className="loading">Loading FAQs...</div>}
+              {faqs.length > 0 ? (
+                faqs.map((faq, index) => (
+                  <div
+                    key={index}
+                    className="faq-item"
+                    onClick={() => handleFaqClick(faq)}
+                    role="button"
+                    aria-label={`Show answer for ${faq.question}`}
+                  >
+                    <div className="faq-question">{faq.question}</div>
+                  </div>
+                ))
+              ) : (
+                <p>No FAQs available for {selectedDomain}. Please try another domain or contact support.</p>
+              )}
             </div>
           ) : (
             messages.map((msg, index) => (

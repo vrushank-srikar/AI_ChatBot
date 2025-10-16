@@ -6,6 +6,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { createClient } from "redis";
+import { initFaqs, checkFaq } from "./faqservice.js";
 
 dotenv.config();
 
@@ -102,6 +103,11 @@ const userSchema = new mongoose.Schema({
           name: String,
           quantity: Number,
           price: Number,
+          domain: {
+            type: String,
+            enum: ["E-commerce", "Travel", "Telecommunications", "Banking Services"],
+            required: true,
+          },
         },
       ],
     },
@@ -135,6 +141,8 @@ const caseSchema = new mongoose.Schema({
 });
 caseSchema.index({ userId: 1, orderId: 1, productIndex: 1 }, { unique: true });
 const Case = mongoose.model("Case", caseSchema);
+
+
 
 // --- Middleware: Auth ---
 async function authMiddleware(req, res, next) {
@@ -507,6 +515,25 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
     }
     const selectedProduct = JSON.parse(selectedProductData);
 
+    // Check for FAQ match
+    const faqAnswer = await checkFaq(message);
+    if (faqAnswer) {
+      const cleanReply = faqAnswer;
+      await redisClient.rPush(
+        `chat:${userId}`,
+        JSON.stringify({
+          prompt: message,
+          reply: cleanReply,
+          orderId: selectedProduct.orderId,
+          productIndex: selectedProduct.productIndex,
+          caseId: null,
+        })
+      );
+      await redisClient.expire(`chat:${userId}`, 86400);
+
+      return res.json({ reply: cleanReply });
+    }
+
     const chatHistory = (await redisClient.lRange(`chat:${userId}`, 0, -1)).map(JSON.parse);
 
     let productText = `Selected Product:\nOrder ${selectedProduct.orderId} (Status: ${selectedProduct.status}, Date: ${new Date(
@@ -649,6 +676,8 @@ Your Response:`;
 });
 
 // --- MongoDB Connection ---
+
+// --- MongoDB Connection ---
 const start = Date.now();
 mongoose.set("debug", true);
 mongoose
@@ -659,7 +688,11 @@ mongoose
     connectTimeoutMS: 10000,
     socketTimeoutMS: 45000,
   })
-  .then(() => console.log(`✅ MongoDB Connected in ${Date.now() - start}ms`))
+  .then(async () => {
+    console.log(`✅ MongoDB Connected in ${Date.now() - start}ms`);
+    // Optionally initialize FAQs with an empty array or new data if needed
+    // await initFaqs([]);
+  })
   .catch((err) => {
     console.error("MongoDB connection error:", {
       message: err.message,
@@ -669,7 +702,6 @@ mongoose
     });
     process.exit(1);
   });
-
 // --- Start Server ---
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
