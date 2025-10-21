@@ -10,7 +10,6 @@ export default function UserDashboard() {
   const [input, setInput] = useState("");
   const [user, setUser] = useState(null);
   const [userCases, setUserCases] = useState([]);
-  const [faqs, setFaqs] = useState([]);
   const [error, setError] = useState(null);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -39,7 +38,7 @@ export default function UserDashboard() {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUserCases(res.data.cases || []);
-      console.log(`Found ${res.data.cases.length} cases`);
+      console.log(`Found ${res.data.cases.length} cases for domain ${selectedDomain}`);
       setError(null);
     } catch (err) {
       console.error("Failed to fetch user cases:", err);
@@ -48,30 +47,6 @@ export default function UserDashboard() {
       setLoading(false);
     }
   }, [id, selectedDomain]);
-
-  // Fetch FAQs when domain is selected
-  const fetchFaqs = useCallback(async () => {
-    if (!selectedDomain) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const token = localStorage.getItem("token");
-      console.log(`Fetching FAQs for domain: ${selectedDomain}`);
-      if (!token) {
-        throw new Error("No authentication token found");
-      }
-      const res = await axios.get(`http://localhost:5000/api/faqs/${selectedDomain}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      console.log("FAQ response:", res.data);
-      setFaqs(res.data.faqs || []);
-    } catch (err) {
-      console.error("Failed to fetch FAQs:", err);
-      setError(err.response?.data?.error || `Failed to load FAQs for ${selectedDomain}.`);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedDomain]);
 
   // Fetch user data on mount
   useEffect(() => {
@@ -121,14 +96,13 @@ export default function UserDashboard() {
     fetchUser();
   }, [id, navigate]);
 
-  // Fetch cases and FAQs when domain is selected
+  // Fetch cases when domain is selected
   useEffect(() => {
     if (selectedDomain) {
       console.log(`Selected domain changed to: ${selectedDomain}`);
       fetchUserCases();
-      fetchFaqs();
     }
-  }, [selectedDomain, fetchUserCases, fetchFaqs]);
+  }, [selectedDomain, fetchUserCases]);
 
   // Scroll chat to bottom when messages update
   useEffect(() => {
@@ -143,7 +117,6 @@ export default function UserDashboard() {
     setSelectedProduct(null);
     setIsChatOpen(false);
     setMessages([]);
-    setFaqs([]); // Clear FAQs when changing domains
     console.log(`Domain selected: ${domain.name}`);
   };
 
@@ -171,9 +144,9 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle sending chat message (used for both user input and FAQ clicks)
-  const handleSend = async (faqQuestion = null, faqAnswer = null) => {
-    const messageToSend = faqQuestion || input.trim();
+  // Handle sending chat message
+  const handleSend = async () => {
+    const messageToSend = input.trim();
     if (!messageToSend || !selectedProduct) return;
 
     // Add user message
@@ -185,20 +158,7 @@ export default function UserDashboard() {
     };
     setMessages((prev) => [...prev, userMsg]);
 
-    // If FAQ, add default answer and skip backend call
-    if (faqQuestion && faqAnswer) {
-      const botMsg = {
-        text: faqAnswer,
-        sender: "bot",
-        senderName: "Support Bot",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-      setLoading(false);
-      return;
-    }
-
-    // Handle non-FAQ messages with backend API
+    // Handle messages with backend API
     setLoading(true);
     setError(null);
 
@@ -232,14 +192,8 @@ export default function UserDashboard() {
       setError(err.response?.data?.error || "Failed to send message.");
     } finally {
       setLoading(false);
-      setInput(""); // Clear input for non-FAQ messages
+      setInput(""); // Clear input after sending
     }
-  };
-
-  // Handle FAQ click
-  const handleFaqClick = (faq) => {
-    console.log(`FAQ clicked: ${faq.question}`);
-    handleSend(faq.question, faq.answer);
   };
 
   // Handle closing chat
@@ -421,7 +375,7 @@ export default function UserDashboard() {
                       {caseItem.responses.length > 0 ? (
                         caseItem.responses.map((response, index) => (
                           <div key={index} className="admin-msg">
-                            <div className="sender-info">{response.adminId?.name || "System"}</div>
+                            <div className="sender-info">{response.adminId?.name || "Support Bot"}</div>
                             <div className="message-text">
                               <ReactMarkdown>{response.message}</ReactMarkdown>
                             </div>
@@ -446,76 +400,60 @@ export default function UserDashboard() {
         </>
       )}
 
-      <div className={`chat-container ${isChatOpen ? "open" : "closed"}`}>
-        <div className="chat-header">
-          <h3>
-            {selectedProduct ? `Chat for ${selectedProduct.name}` : "Support Chat"}
-          </h3>
-          <button className="close-chat" onClick={handleCloseChat}>
-            &times;
-          </button>
-        </div>
-        <div className="chat-box" ref={chatBoxRef}>
-          {messages.length === 0 && isChatOpen ? (
-            <div className="faq-list">
-              <h4>Frequently Asked Questions</h4>
-              {loading && <div className="loading">Loading FAQs...</div>}
-              {faqs.length > 0 ? (
-                faqs.map((faq, index) => (
-                  <div
-                    key={index}
-                    className="faq-item"
-                    onClick={() => handleFaqClick(faq)}
-                    role="button"
-                    aria-label={`Show answer for ${faq.question}`}
-                  >
-                    <div className="faq-question">{faq.question}</div>
+      {isChatOpen && (
+        <div className="chat-container">
+          <div className="chat-header">
+            <h3>
+              {selectedProduct ? `Chat for ${selectedProduct.name}` : "Support Chat"}
+            </h3>
+            <button className="close-chat" onClick={handleCloseChat}>
+              &times;
+            </button>
+          </div>
+          <div className="chat-box" ref={chatBoxRef}>
+            {messages.length === 0 ? (
+              <h3><b>💬Start a conversation with our AI Assistant 🤖 for instant support.</b></h3>
+            ) : (
+              messages.map((msg, index) => (
+                <div key={index} className={msg.sender === "user" ? "user-msg" : "bot-msg"}>
+                  <div className="sender-info">{msg.senderName}</div>
+                  <div className="message-text">
+                    <ReactMarkdown>{msg.text}</ReactMarkdown>
                   </div>
-                ))
-              ) : (
-                <p>No FAQs available for {selectedDomain}. Please try another domain or contact support.</p>
-              )}
-            </div>
-          ) : (
-            messages.map((msg, index) => (
-              <div key={index} className={msg.sender === "user" ? "user-msg" : "bot-msg"}>
-                <div className="sender-info">{msg.senderName}</div>
-                <div className="message-text">
-                  <ReactMarkdown>{msg.text}</ReactMarkdown>
+                  <div className="timestamp">{new Date(msg.timestamp).toLocaleString()}</div>
                 </div>
-                <div className="timestamp">{new Date(msg.timestamp).toLocaleString()}</div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
+          <div className="chat-input">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Type your message..."
+              disabled={loading}
+            />
+            <button onClick={() => handleSend()} disabled={loading}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                width="24"
+                height="24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
-        <div className="chat-input">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Type your message..."
-            disabled={loading}
-          />
-          <button onClick={() => handleSend()} disabled={loading}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              width="24"
-              height="24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

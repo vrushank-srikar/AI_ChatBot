@@ -1,13 +1,13 @@
 import axios from "axios";
 import mongoose from "mongoose";
 
-// --- FAQ Model (safe for ES modules) ---
+// --- FAQ Model ---
 const faqSchema = new mongoose.Schema({
   question: String,
   answer: String,
   domain: String,
   embedding: [Number],
-}, { collection: 'faqs' }); // Explicitly set collection name to 'faqs'
+}, { collection: 'faqs' });
 
 // Use existing model if already compiled (prevents OverwriteModelError)
 const Faq = mongoose.models.Faq || mongoose.model("Faq", faqSchema);
@@ -36,7 +36,7 @@ function cosineSimilarity(a, b) {
   return dot / (magA * magB);
 }
 
-// --- Initialize FAQs (placeholder, to be called with external FAQ data if needed) ---
+// --- Initialize FAQs ---
 async function initFaqs(faqCollections) {
   for (const collection of faqCollections) {
     for (const faq of collection.faqs) {
@@ -74,4 +74,5 @@ async function checkFaq(message) {
   }
 }
 
-export { initFaqs, checkFaq, Faq };
+// Export all necessary functions and models
+export { initFaqs, checkFaq, getEmbedding, Faq };

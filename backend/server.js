@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { createClient } from "redis";
-import { initFaqs, checkFaq } from "./faqservice.js";
+import { initFaqs, checkFaq, getEmbedding, Faq } from "./faqservice.js";
 
 dotenv.config();
 
@@ -34,7 +34,7 @@ redisClient.on("error", (err) => console.error("Redis Error:", err));
 await redisClient.connect();
 
 // --- Gemini Models ---
-const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.0"];
+const GEMINI_MODELS = ["gemini-2.5-pro","gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.0-flash","gemini-2.0-flash-lite" ];
 
 // --- Helper: Call Gemini with fallback ---
 async function callGemini(prompt) {
@@ -142,8 +142,6 @@ const caseSchema = new mongoose.Schema({
 caseSchema.index({ userId: 1, orderId: 1, productIndex: 1 }, { unique: true });
 const Case = mongoose.model("Case", caseSchema);
 
-
-
 // --- Middleware: Auth ---
 async function authMiddleware(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
@@ -181,6 +179,7 @@ app.post("/api/select-product", authMiddleware, async (req, res) => {
       name: product.name,
       quantity: product.quantity,
       price: product.price,
+      domain: product.domain,
       orderDate: order.orderDate,
       status: order.status,
     };
@@ -491,6 +490,7 @@ app.post("/api/logout", authMiddleware, async (req, res) => {
 });
 
 // --- Chat ---
+// --- Chat ---
 app.post("/api/chat", authMiddleware, async (req, res) => {
   try {
     const userId = req.userId;
@@ -540,9 +540,9 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
       selectedProduct.orderDate
     ).toLocaleDateString()}):\n  Product Index ${selectedProduct.productIndex}: ${selectedProduct.name} (Qty: ${
       selectedProduct.quantity
-    }, Price: ₹${selectedProduct.price})\n`;
+    }, Price: ₹${selectedProduct.price}, Domain: ${selectedProduct.domain})\n`;
 
-    let prompt = `You are a helpful e-commerce assistant. Use the provided user data and selected product to answer questions or create support cases.
+    let prompt = `You are a helpful e-commerce assistant. Use the provided user data and selected product to answer questions or create support cases/FAQs.
 
 USER DATA:
 Name: ${user.name}
@@ -553,9 +553,23 @@ ${productText}
 
 INSTRUCTIONS:
 - Focus responses on the selected product unless the user specifies otherwise.
-- If the user wants to create a support case/ticket (keywords: "create case", "report issue", "problem with", "complaint", "refund", "return", "defective", "delivery issue", "cancel", "undo"), use the selected product's orderId and productIndex. Determine priority based on the issue: "high" for payment-related issues (e.g., payment, refund, billing, charge, transaction), "low" for order-related or other issues (e.g., order, delivery, product, item, cancel, undo). Respond helpfully (e.g., "I've created a support case for your [product]...") and end your response with exactly this JSON on a new line: {"createCase": true, "orderId": "exact_order_id", "productIndex": exact_number, "description": "brief_summary_of_issue", "priority": "high_or_low"}
-- For other queries, answer normally using the selected product or user data if relevant.
-- Ensure responses are concise, helpful, and strictly follow the JSON format for case creation.
+- If the user's query is not about a problem or issue, answer normally using the selected product or user data if relevant.
+- If the user's query describes a problem or issue with the product (keywords: "issue", "problem", "complaint", "refund", "return", "defective", "delivery issue", "cancel", "undo", "payment", "billing", "charge", "transaction", "invalid"):
+  - Determine if it is a common problem. Common problems include:
+    - Refund issues (e.g., "did not get a refund", "refund not processed", "invalid transaction", "invalid payment").
+    - Payment errors (e.g., "payment failed", "charged twice", "billing issue").
+    - Delivery delays or issues (e.g., "late delivery", "not delivered").
+    - Standard return or cancellation requests (e.g., "return product", "cancel order").
+  - If it is a common problem:
+    - Provide a concise, helpful answer to resolve the issue (e.g., steps to check refund status, return process, or payment troubleshooting).
+    - End your response with exactly this JSON on a new line: {"createFAQ": true, "question": "generalized_question_for_FAQ", "answer": "generalized_answer_for_FAQ", "domain": "${selectedProduct.domain}"}
+    - Ensure the generalized question and answer are broad enough to apply to similar issues (e.g., "How do I resolve a refund issue?" instead of the user's exact query).
+  - If it is not a common problem (e.g., highly specific issues like "product arrived damaged with specific details" or unique account issues):
+    - Provide a helpful reply informing the user that this seems like a specific issue and a support case will be created.
+    - End your response with exactly this JSON on a new line: {"createCase": true, "orderId": "${selectedProduct.orderId}", "productIndex": ${selectedProduct.productIndex}, "description": "brief_summary_of_issue", "priority": "high_or_low"}
+- Determine priority for cases based on the issue: "high" for payment-related issues (e.g., payment, refund, billing, charge, transaction, invalid), "low" for order-related or other issues (e.g., order, delivery, product, item, cancel, undo).
+- Ensure responses are concise, helpful, and strictly follow the JSON format only when creating FAQ or case. Do not include both createFAQ and createCase in the same response.
+- If unsure whether the problem is common, lean towards creating an FAQ for refund, payment, delivery, or return issues.
 
 Chat History:
 ${chatHistory.length > 0 ? chatHistory.slice(-5).map((c) => `Q: ${c.prompt}\nA: ${c.reply}`).join("\n\n") : "No history."}
@@ -571,89 +585,116 @@ Your Response:`;
     console.log("Gemini reply:", reply);
 
     let caseData = null;
+    let faqData = null;
+    let cleanReply = reply.trim();
+
     try {
-      const cleanReply = reply.replace(/```(?:json)?\n|\n```/g, "").trim();
-      console.log("Cleaned reply for JSON parsing:", cleanReply);
       const jsonMatch = cleanReply.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}(?=\s*$)/);
       if (jsonMatch) {
-        caseData = JSON.parse(jsonMatch[0]);
-        console.log("Parsed case data:", caseData);
-        if (caseData.createCase) {
-          const priority = caseData.priority || determinePriority(caseData.description || message);
-          // Filter chat history for unsaved messages related to this product
-          const caseResponses = chatHistory
-            .filter(
-              (chat) =>
-                chat.orderId === caseData.orderId &&
-                chat.productIndex === caseData.productIndex &&
-                chat.caseId === null
-            )
-            .flatMap((chat) => [
-              { adminId: null, message: `User: ${chat.prompt}`, timestamp: new Date() },
-              { adminId: null, message: `Bot: ${chat.reply}`, timestamp: new Date() },
-            ]);
-          // Add the current message and reply
-          caseResponses.push(
-            { adminId: null, message: `User: ${message}`, timestamp: new Date() },
-            { adminId: null, message: `Bot: ${cleanReply}`, timestamp: new Date() }
-          );
-
-          // Check for existing case
-          const existingCase = await Case.findOne({
-            userId,
-            orderId: caseData.orderId,
-            productIndex: caseData.productIndex,
-          });
-
-          let newCase;
-          if (existingCase) {
-            // Update existing case
-            existingCase.description = caseData.description || message;
-            existingCase.priority = priority;
-            existingCase.responses.push(...caseResponses);
-            existingCase.updatedAt = new Date();
-            await existingCase.save();
-            newCase = existingCase;
-            console.log(`Updated case ${newCase._id} for user ${userId}: order ${caseData.orderId}, product index ${caseData.productIndex}, priority ${priority}`);
-          } else {
-            // Create new case
-            newCase = new Case({
-              userId,
-              orderId: caseData.orderId,
-              productIndex: caseData.productIndex,
-              description: caseData.description || message,
-              priority,
-              responses: caseResponses,
-            });
-            await newCase.save();
-            console.log(`Created case ${newCase._id} for user ${userId}: order ${caseData.orderId}, product index ${caseData.productIndex}, priority ${priority}`);
-          }
-          console.log(`Case responses included:`, caseResponses);
-
-          // Update Redis chat history with caseId
-          const updatedChatHistory = chatHistory.map((chat) => {
-            if (
-              chat.orderId === caseData.orderId &&
-              chat.productIndex === caseData.productIndex &&
-              chat.caseId === null
-            ) {
-              return { ...chat, caseId: newCase._id.toString() };
-            }
-            return chat;
-          });
-          // Replace Redis chat history
-          await redisClient.del(`chat:${userId}`);
-          for (const chat of updatedChatHistory) {
-            await redisClient.rPush(`chat:${userId}`, JSON.stringify(chat));
-          }
-          await redisClient.expire(`chat:${userId}`, 86400);
+        const parsedJson = JSON.parse(jsonMatch[0]);
+        console.log("Parsed JSON data:", parsedJson);
+        
+        if (parsedJson.createFAQ) {
+          faqData = parsedJson;
+        } else if (parsedJson.createCase) {
+          caseData = parsedJson;
         }
+        
+        cleanReply = cleanReply.replace(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}(?=\s*$)/, "").trim();
       }
     } catch (parseErr) {
-      console.error("Failed to parse case JSON from reply:", parseErr, "Reply:", reply);
+      console.error("Failed to parse JSON from reply:", parseErr, "Reply:", reply);
     }
 
-    const cleanReply = reply.replace(/```(?:json)?\n|\n```|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}(?=\s*$)/g, "").trim();
+    if (faqData) {
+      try {
+        const embedding = await getEmbedding(faqData.question);
+        const existingFaq = await Faq.findOne({ question: faqData.question, domain: faqData.domain });
+        if (!existingFaq) {
+          const newFaq = new Faq({
+            question: faqData.question,
+            answer: faqData.answer,
+            domain: faqData.domain,
+            embedding,
+          });
+          await newFaq.save();
+          console.log(`Created new FAQ: ${faqData.question} for domain: ${faqData.domain}`);
+        } else {
+          console.log(`FAQ already exists: ${faqData.question} for domain: ${faqData.domain}`);
+        }
+      } catch (err) {
+        console.error("Failed to create FAQ:", err);
+      }
+    } else if (caseData) {
+      const priority = caseData.priority || determinePriority(caseData.description || message);
+      // Filter chat history for unsaved messages related to this product
+      const caseResponses = chatHistory
+        .filter(
+          (chat) =>
+            chat.orderId === caseData.orderId &&
+            chat.productIndex === caseData.productIndex &&
+            chat.caseId === null
+        )
+        .flatMap((chat) => [
+          { adminId: null, message: `User: ${chat.prompt}`, timestamp: new Date() },
+          { adminId: null, message: `Bot: ${chat.reply}`, timestamp: new Date() },
+        ]);
+      // Add the current message and reply
+      caseResponses.push(
+        { adminId: null, message: `User: ${message}`, timestamp: new Date() },
+        { adminId: null, message: `Bot: ${cleanReply}`, timestamp: new Date() }
+      );
+
+      // Check for existing case
+      const existingCase = await Case.findOne({
+        userId,
+        orderId: caseData.orderId,
+        productIndex: caseData.productIndex,
+      });
+
+      let newCase;
+      if (existingCase) {
+        // Update existing case
+        existingCase.description = caseData.description || message;
+        existingCase.priority = priority;
+        existingCase.responses.push(...caseResponses);
+        existingCase.updatedAt = new Date();
+        await existingCase.save();
+        newCase = existingCase;
+        console.log(`Updated case ${newCase._id} for user ${userId}: order ${caseData.orderId}, product index ${caseData.productIndex}, priority ${priority}`);
+      } else {
+        // Create new case
+        newCase = new Case({
+          userId,
+          orderId: caseData.orderId,
+          productIndex: caseData.productIndex,
+          description: caseData.description || message,
+          priority,
+          responses: caseResponses,
+        });
+        await newCase.save();
+        console.log(`Created case ${newCase._id} for user ${userId}: order ${caseData.orderId}, product index ${caseData.productIndex}, priority ${priority}`);
+      }
+      console.log(`Case responses included:`, caseResponses);
+
+      // Update Redis chat history with caseId
+      const updatedChatHistory = chatHistory.map((chat) => {
+        if (
+          chat.orderId === caseData.orderId &&
+          chat.productIndex === caseData.productIndex &&
+          chat.caseId === null
+        ) {
+          return { ...chat, caseId: newCase._id.toString() };
+        }
+        return chat;
+      });
+      // Replace Redis chat history
+      await redisClient.del(`chat:${userId}`);
+      for (const chat of updatedChatHistory) {
+        await redisClient.rPush(`chat:${userId}`, JSON.stringify(chat));
+      }
+      await redisClient.expire(`chat:${userId}`, 86400);
+    }
 
     // Store current message in Redis with orderId, productIndex, and caseId: null
     await redisClient.rPush(
@@ -674,8 +715,6 @@ Your Response:`;
     res.status(500).json({ error: "Chat failed" });
   }
 });
-
-// --- MongoDB Connection ---
 
 // --- MongoDB Connection ---
 const start = Date.now();
