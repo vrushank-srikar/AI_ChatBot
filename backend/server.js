@@ -25,14 +25,16 @@ app.use(cors());
 
 // --- Redis Client ---
 const redisClient = createClient({
-  url: process.env.REDIS_URL || "redis://localhost:6379",
+  url: process.env.REDIS_URL || "redis://localhost:6379", // Fallback for local dev
   socket: {
     reconnectStrategy: (retries) => Math.min(retries * 50, 1000),
+    // Add TLS options if using a managed service with TLS
+    tls: process.env.REDIS_USE_TLS === 'true' ? {} : false, // Empty {} enables default TLS
   },
+  password: process.env.REDIS_PASSWORD, // Optional: For auth-enabled services
 });
 redisClient.on("error", (err) => console.error("Redis Error:", err));
-await redisClient.connect();
-
+await redisClient.connect(); // This will now connect to your online instance
 // --- Gemini Models ---
 const GEMINI_MODELS = ["gemini-2.5-pro","gemini-2.5-flash","gemini-2.5-flash-lite","gemini-2.0-flash","gemini-2.0-flash-lite" ];
 
