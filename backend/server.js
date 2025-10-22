@@ -6,7 +6,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import axios from "axios";
 import { createClient } from "redis";
-import { initFaqs, checkFaq, getEmbedding, Faq } from "./faqservice.js";
+import { initFaqs, checkFaq, getEmbedding, Faq } from "./faqService.js";
 
 dotenv.config();
 
