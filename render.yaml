@@ -5,8 +5,9 @@ services:
     repo: https://github.com/vrushank-srikar/AI_ChatBot.git
     plan: free
     region: oregon
+    rootDir: backend
     buildCommand: npm install
-    startCommand: node backend/server.js
+    startCommand: node server.js
     envVars:
       - key: MONGO_URI
         sync: false
@@ -21,14 +22,16 @@ services:
       - key: REDIS_PASSWORD
         sync: false
     autoDeploy: true
+
   - type: web
     name: frontend
     env: static
     repo: https://github.com/vrushank-srikar/AI_ChatBot.git
     plan: free
     region: oregon
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: frontend/dist
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
     envVars:
       - key: VITE_API_BASE_URL
         sync: false
