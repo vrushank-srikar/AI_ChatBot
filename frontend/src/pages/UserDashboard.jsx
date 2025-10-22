@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
-import "../styles/userDashboard.css";
+import "../styles/UserDashboard.css";
 
 export default function UserDashboard() {
   const { id } = useParams();
