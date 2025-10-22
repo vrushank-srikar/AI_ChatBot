@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: backend
+    env: node
+    repo: https://github.com/vrushank-srikar/AI_ChatBot.git
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: node backend/server.js
+    envVars:
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: REDIS_USE_TLS
+        value: true
+      - key: REDIS_PASSWORD
+        sync: false
+    autoDeploy: true
+  - type: web
+    name: frontend
+    env: static
+    repo: https://github.com/vrushank-srikar/AI_ChatBot.git
+    plan: free
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+    autoDeploy: true
