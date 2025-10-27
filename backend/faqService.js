@@ -1,78 +1,92 @@
+// faqService.js
 import axios from "axios";
 import mongoose from "mongoose";
 
-// --- FAQ Model ---
-const faqSchema = new mongoose.Schema({
-  question: String,
-  answer: String,
-  domain: String,
-  embedding: [Number],
-}, { collection: 'faqs' });
+const faqSchema = new mongoose.Schema(
+  {
+    question: String,
+    answer: String,
+    domain: {
+      type: String,
+      enum: ["E-commerce", "Travel", "Telecommunications", "Banking Services"],
+      required: true,
+    },
+    embedding: [Number],
+  },
+  { collection: "faqs" }
+);
 
-// Use existing model if already compiled (prevents OverwriteModelError)
-const Faq = mongoose.models.Faq || mongoose.model("Faq", faqSchema);
+export const Faq = mongoose.models.Faq || mongoose.model("Faq", faqSchema);
 
-// --- Get embedding from Gemini ---
-async function getEmbedding(text) {
+export async function getEmbedding(text) {
   try {
-    const response = await axios.post(
+    const r = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${process.env.GEMINI_API_KEY}`,
       { content: { parts: [{ text }] } },
       { headers: { "Content-Type": "application/json" } }
     );
-    return response.data.embedding.values;
+    return r.data.embedding.values;
   } catch (err) {
-    console.error("Embedding error:", err.message);
+    console.error("Embedding error:", err?.message || err);
     throw new Error("Failed to get embedding");
   }
 }
 
-// --- Cosine similarity ---
-function cosineSimilarity(a, b) {
-  let dot = 0;
-  for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-  const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-  const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-  return dot / (magA * magB);
+export function cosineSimilarity(a = [], b = []) {
+  let dot = 0,
+    na = 0,
+    nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const ai = a[i] || 0,
+      bi = b[i] || 0;
+    dot += ai * bi;
+    na += ai * ai;
+    nb += bi * bi;
+  }
+  if (!na || !nb) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-// --- Initialize FAQs ---
-async function initFaqs(faqCollections) {
-  for (const collection of faqCollections) {
-    for (const faq of collection.faqs) {
-      const existing = await Faq.findOne({ question: faq.question, domain: faq.domain });
+export async function initFaqs(faqCollections) {
+  for (const { faqs } of faqCollections) {
+    for (const faq of faqs) {
+      const existing = await Faq.findOne({
+        question: faq.question,
+        domain: faq.domain,
+      });
       if (!existing) {
         const embedding = await getEmbedding(faq.question);
         await new Faq({ ...faq, embedding }).save();
-        console.log(`Added FAQ: ${faq.question} for domain: ${faq.domain}`);
+        console.log(`Added FAQ: ${faq.question} [${faq.domain}]`);
       }
     }
   }
 }
 
-// --- Check user query against FAQs ---
-async function checkFaq(message) {
+export async function checkFaq(message, domain) {
   try {
-    const queryEmbedding = await getEmbedding(message);
-    const faqs = await Faq.find({});
-    let maxSim = 0;
-    let bestAnswer = null;
+    const THRESH = Number(process.env.FAQ_SIM_THRESHOLD ?? 0.76);
+    const TOPK = Number(process.env.FAQ_TOP_K ?? 3);
 
-    for (const faq of faqs) {
-      const sim = cosineSimilarity(queryEmbedding, faq.embedding);
-      if (sim > maxSim) {
-        maxSim = sim;
-        bestAnswer = faq.answer;
-      }
-    }
+    const queryEmbedding = await getEmbedding(message.slice(0, 512));
+    const filter = domain ? { domain } : {};
+    const faqs = await Faq.find(filter).lean();
 
-    if (maxSim > 0.8) return bestAnswer; // Threshold for similarity
-    return null;
+    const ranked = faqs
+      .map((f) => ({
+        ans: f.answer,
+        score: cosineSimilarity(queryEmbedding, f.embedding),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, TOPK);
+
+    const best = ranked[0];
+    return best && best.score >= THRESH
+      ? { answer: best.ans, score: best.score }
+      : null;
   } catch (err) {
-    console.error("Check FAQ error:", err.message);
+    console.error("checkFaq error:", err?.message || err);
     return null;
   }
 }
-
-// Export all necessary functions and models
-export { initFaqs, checkFaq, getEmbedding, Faq };

@@ -2,10 +2,15 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
+import { io } from "socket.io-client";
 import "../styles/UserDashboard.css";
+
+const API_BASE = "http://localhost:5000";
 
 export default function UserDashboard() {
   const { id } = useParams();
+  const navigate = useNavigate();
+
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [user, setUser] = useState(null);
@@ -15,10 +20,17 @@ export default function UserDashboard() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedDomain, setSelectedDomain] = useState(null);
   const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-  const chatBoxRef = useRef(null);
+  const [isBotTyping, setIsBotTyping] = useState(false);
+  const [isEndingChat, setIsEndingChat] = useState(false);
 
-  // Define domains for display
+  const chatBoxRef = useRef(null);
+  const inactivityTimeoutRef = useRef(null);
+  const socketRef = useRef(null);
+
+  // keep current selection inside listeners without re-subscribing
+  const selectedRef = useRef(null);
+  const seenEventsRef = useRef(new Set());
+
   const domains = [
     { name: "E-commerce", icon: "🛒", description: "Manage your online shopping orders and support cases." },
     { name: "Travel", icon: "✈️", description: "Track travel bookings and resolve travel-related issues." },
@@ -26,20 +38,33 @@ export default function UserDashboard() {
     { name: "Banking Services", icon: "🏦", description: "Monitor accounts, transactions, and banking support." },
   ];
 
-  // Fetch user cases with cache busting
+  /* ------------------------ helpers: inactivity timer ------------------------ */
+  const clearInactivityTimeout = useCallback(() => {
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+      inactivityTimeoutRef.current = null;
+    }
+  }, []);
+
+  const setInactivityTimeout = useCallback(() => {
+    clearInactivityTimeout();
+    inactivityTimeoutRef.current = setTimeout(() => {
+      handleCloseChat();
+    }, 15 * 60 * 1000); // 15 minutes
+  }, [clearInactivityTimeout]);
+
+  /* ------------------------------ data fetching ----------------------------- */
   const fetchUserCases = useCallback(async () => {
     if (!id || !selectedDomain) return;
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("token");
-      console.log(`Fetching cases for user ${id}, domain: ${selectedDomain}`);
-      const res = await axios.get(`http://localhost:5000/api/user/${id}/cases?domain=${selectedDomain}&_t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await axios.get(
+        `${API_BASE}/api/user/${id}/cases?domain=${selectedDomain}&_t=${Date.now()}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       setUserCases(res.data.cases || []);
-      console.log(`Found ${res.data.cases.length} cases for domain ${selectedDomain}`);
-      setError(null);
     } catch (err) {
       console.error("Failed to fetch user cases:", err);
       setError(err.response?.data?.error || "Failed to fetch cases.");
@@ -48,7 +73,6 @@ export default function UserDashboard() {
     }
   }, [id, selectedDomain]);
 
-  // Fetch user data on mount
   useEffect(() => {
     const fetchUser = async () => {
       setLoading(true);
@@ -62,22 +86,16 @@ export default function UserDashboard() {
         }
 
         const source = axios.CancelToken.source();
-        const timeout = setTimeout(() => {
-          source.cancel("Request timed out");
-        }, 10000);
+        const timeout = setTimeout(() => source.cancel("Request timed out"), 10000);
 
-        const res = await axios.get(`http://localhost:5000/api/user/${id}`, {
+        const res = await axios.get(`${API_BASE}/api/user/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
           cancelToken: source.token,
         });
 
         clearTimeout(timeout);
-        if (res.data) {
-          setUser(res.data);
-          console.log("User data fetched:", res.data);
-        } else {
-          setError("No user data returned from the server.");
-        }
+        if (res.data) setUser(res.data);
+        else setError("No user data returned from the server.");
       } catch (err) {
         console.error("Failed to fetch user:", err);
         if (axios.isCancel(err)) {
@@ -96,46 +114,232 @@ export default function UserDashboard() {
     fetchUser();
   }, [id, navigate]);
 
-  // Fetch cases when domain is selected
   useEffect(() => {
-    if (selectedDomain) {
-      console.log(`Selected domain changed to: ${selectedDomain}`);
-      fetchUserCases();
-    }
+    if (selectedDomain) fetchUserCases();
   }, [selectedDomain, fetchUserCases]);
 
-  // Scroll chat to bottom when messages update
+  // auto-scroll on new content
   useEffect(() => {
     if (chatBoxRef.current && isChatOpen) {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
-  }, [messages, isChatOpen]);
+  }, [messages, isChatOpen, isBotTyping]);
 
-  // Handle domain selection
+  useEffect(() => () => clearInactivityTimeout(), [clearInactivityTimeout]);
+
+  // keep current product available to socket listeners
+  useEffect(() => {
+    selectedRef.current = selectedProduct;
+  }, [selectedProduct]);
+
+  /* ------------------------- thread loaders (unified) ------------------------ */
+  const normalizeThreadToMessages = (thread = []) => {
+    const out = [];
+    thread.forEach((t) => {
+      if (t.prompt) {
+        out.push({
+          text: t.prompt,
+          sender: "user",
+          senderName: user?.name || "User",
+          timestamp: t.timestamp || new Date().toISOString(),
+        });
+      }
+      if (t.message) {
+        const sender = t.source === "agent" ? "agent" : "bot";
+        const senderName = sender === "agent" ? "Support Agent" : "Support Bot";
+        out.push({
+          text: t.message,
+          sender,
+          senderName,
+          timestamp: t.timestamp || new Date().toISOString(),
+        });
+      }
+    });
+    return out;
+  };
+
+  // Fallback for older backend: map /api/chat/history into message pairs
+  const normalizeHistoryToMessages = (chats = []) => {
+    const out = [];
+    chats.forEach((c) => {
+      if (c.prompt) {
+        out.push({
+          text: c.prompt,
+          sender: "user",
+          senderName: user?.name || "User",
+          timestamp: c.timestamp || new Date().toISOString(),
+        });
+      }
+      if (c.reply) {
+        out.push({
+          text: c.reply,
+          sender: c.source === "case-memory" || c.source === "faq" || c.source === "llm" ? "bot" : "bot",
+          senderName: "Support Bot",
+          timestamp: c.timestamp || new Date().toISOString(),
+        });
+      }
+    });
+    return out;
+  };
+
+  const fetchUnifiedThread = async (orderId, productIndex) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      // Preferred: unified thread API
+      const res = await axios.get(`${API_BASE}/api/chat/thread`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: { orderId, productIndex },
+      });
+      const normalized = normalizeThreadToMessages(res.data.thread || []);
+      setMessages(normalized);
+    } catch (err) {
+      // graceful fallback to old history API
+      try {
+        const token = localStorage.getItem("token");
+        const res = await axios.get(`${API_BASE}/api/chat/history`, {
+          headers: { Authorization: `Bearer ${token}` },
+          params: { orderId, productIndex },
+        });
+        const normalized = normalizeHistoryToMessages(res.data.chats || []);
+        setMessages(normalized);
+      } catch (e2) {
+        console.error("Failed to fetch chat thread:", e2);
+      }
+    }
+  };
+
+  /* ---------------------------- socket: connect once ---------------------------- */
+  // tiny de-dup (covers strict-mode re-mount, reconnects, etc.)
+  function shouldAcceptEvent(key) {
+    const set = seenEventsRef.current;
+    if (set.has(key)) return false;
+    set.add(key);
+    if (set.size > 200) {
+      // keep it bounded
+      const last = Array.from(set).slice(-150);
+      seenEventsRef.current = new Set(last);
+    }
+    return true;
+  }
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    if (socketRef.current?.connected) return; // already connected
+
+    const socket = io(API_BASE, { auth: { token } });
+    socketRef.current = socket;
+
+    // bot or agent mirrored as chat
+    socket.on("chat:reply", (payload) => {
+      if (payload.source === "agent") return; 
+      const sel = selectedRef.current;
+      if (!sel) return;
+
+      if (
+        String(payload.orderId) !== String(sel.orderId) ||
+        Number(payload.productIndex) !== Number(sel.productIndex)
+      ) return;
+
+       const key = payload.eventId || `reply|${payload.orderId}|${payload.productIndex}|${payload.source}|${payload.message}|${Math.floor((payload.timestamp || Date.now())/1000)}`;
+  if (!shouldAcceptEvent(key)) return;
+      const sender = payload.source === "agent" ? "agent" : "bot";
+      const senderName = sender === "agent" ? "Support Agent" : "Support Bot";
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: payload.message,
+          sender,
+          senderName,
+          timestamp: payload.timestamp || new Date().toISOString(),
+        },
+      ]);
+
+      if (chatBoxRef.current) {
+        setTimeout(() => {
+          chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+        }, 0);
+      }
+    });
+
+    // raw case messages (admin panel)
+    socket.on("case:message", (payload) => {
+      // We can't verify order/product here unless server also emits them.
+      // We still de-dup and show since it's for the same user.
+      const key =
+        (payload.eventId && `case|${payload.eventId}`) ||
+        `case|${payload.caseId}|${payload.sender}|${payload.message}|${Math.floor((payload.timestamp || Date.now()) / 1000)}`;
+      if (!shouldAcceptEvent(key)) return;
+
+      const sender = payload.sender === "agent" ? "agent" : "system";
+      const senderName = sender === "agent" ? "Support Agent" : "System";
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: payload.message,
+          sender,
+          senderName,
+          timestamp: payload.timestamp || new Date().toISOString(),
+        },
+      ]);
+
+      if (chatBoxRef.current) {
+        setTimeout(() => {
+          chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+        }, 0);
+      }
+    });
+
+    socket.on("case:status", () => {
+      fetchUserCases();
+    });
+
+    return () => {
+      try {
+        socket.off("chat:reply");
+        socket.off("case:message");
+        socket.off("case:status");
+        socket.disconnect();
+      } catch {}
+      socketRef.current = null;
+      seenEventsRef.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount once
+
+  /* ------------------------------- UI handlers ------------------------------ */
   const handleDomainClick = (domain) => {
+    clearInactivityTimeout();
     setSelectedDomain(domain.name);
     setSelectedProduct(null);
     setIsChatOpen(false);
     setMessages([]);
-    console.log(`Domain selected: ${domain.name}`);
+    setIsEndingChat(false);
   };
 
-  // Handle product selection
   const handleProductClick = async (product) => {
     setLoading(true);
     setError(null);
+    setIsEndingChat(false);
     try {
       const token = localStorage.getItem("token");
-      console.log(`Selecting product: ${product.name}`);
       await axios.post(
-        "http://localhost:5000/api/select-product",
+        `${API_BASE}/api/select-product`,
         { orderId: product.orderId, productIndex: product.productIndex },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setSelectedProduct(product);
+
+      // load unified thread (bot + agent)
+      await fetchUnifiedThread(product.orderId, product.productIndex);
+
+      // open chat & start inactivity timer
       setIsChatOpen(true);
-      setMessages([]);
-      setError(null);
+      setInactivityTimeout();
     } catch (err) {
       console.error("Failed to select product:", err);
       setError("Failed to select product for chat.");
@@ -144,12 +348,19 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle sending chat message
+  // keep thread in sync if product changes elsewhere
+  useEffect(() => {
+    if (selectedProduct) {
+      fetchUnifiedThread(selectedProduct.orderId, selectedProduct.productIndex);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProduct?.orderId, selectedProduct?.productIndex]);
+
   const handleSend = async () => {
     const messageToSend = input.trim();
-    if (!messageToSend || !selectedProduct) return;
+    if (!messageToSend || !selectedProduct || isEndingChat) return;
 
-    // Add user message
+    // show the user's message immediately
     const userMsg = {
       text: messageToSend,
       sender: "user",
@@ -158,8 +369,8 @@ export default function UserDashboard() {
     };
     setMessages((prev) => [...prev, userMsg]);
 
-    // Handle messages with backend API
-    setLoading(true);
+    setInactivityTimeout();
+    setIsBotTyping(true);
     setError(null);
 
     try {
@@ -167,50 +378,61 @@ export default function UserDashboard() {
       if (!token) {
         setError("No authentication token found. Please log in.");
         navigate("/");
+        setIsBotTyping(false);
         return;
       }
 
-      const res = await axios.post(
-        "http://localhost:5000/api/chat",
+      // send to backend; DO NOT append bot reply here (socket will push it)
+      await axios.post(
+        `${API_BASE}/api/chat`,
         { message: messageToSend },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      const botMsg = {
-        text: res.data.reply,
-        sender: "bot",
-        senderName: "Support Bot",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, botMsg]);
-
-      // Refresh cases after a delay to allow backend to process
-      setTimeout(fetchUserCases, 1000);
-      setError(null);
+      // refresh cases shortly after
+      setTimeout(fetchUserCases, 800);
     } catch (err) {
       console.error("Chat error:", err);
       setError(err.response?.data?.error || "Failed to send message.");
     } finally {
-      setLoading(false);
-      setInput(""); // Clear input after sending
+      setIsBotTyping(false);
+      setInput("");
     }
   };
 
-  // Handle closing chat
   const handleCloseChat = async () => {
+    if (isEndingChat) return;
+    clearInactivityTimeout();
+    setIsEndingChat(true);
+    setMessages((prev) => [
+      ...prev,
+      {
+        text: "The chat has been ended.",
+        sender: "system",
+        senderName: "System",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    }
+  };
+
+  const handleDirectClose = async () => {
+    clearInactivityTimeout();
+    setIsEndingChat(false);
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("token");
       await axios.post(
-        "http://localhost:5000/api/clear-selected-product",
+        `${API_BASE}/api/clear-selected-product`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setSelectedProduct(null);
       setMessages([]);
       setIsChatOpen(false);
-      setError(null);
     } catch (err) {
       console.error("Failed to clear selected product:", err);
       setError("Failed to clear selected product.");
@@ -219,15 +441,15 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle logout
   const handleLogout = async () => {
+    clearInactivityTimeout();
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem("token");
       if (token) {
         await axios.post(
-          "http://localhost:5000/api/logout",
+          `${API_BASE}/api/logout`,
           {},
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -242,14 +464,14 @@ export default function UserDashboard() {
     }
   };
 
-  // Handle enter key for sending messages
   const handleKeyPress = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !isEndingChat) {
       e.preventDefault();
       handleSend();
     }
   };
 
+  /* ---------------------------------- UI ---------------------------------- */
   if (error) {
     return (
       <div className="user-dashboard">
@@ -270,15 +492,17 @@ export default function UserDashboard() {
     );
   }
 
-  const allProducts = user.orders.flatMap((order) =>
-    order.products.map((product, index) => ({
-      ...product,
-      orderId: order.orderId,
-      orderDate: order.orderDate,
-      status: order.status,
-      productIndex: index,
-    }))
-  ).filter((product) => !selectedDomain || product.domain === selectedDomain);
+  const allProducts = user.orders
+    .flatMap((order) =>
+      order.products.map((product, index) => ({
+        ...product,
+        orderId: order.orderId,
+        orderDate: order.orderDate,
+        status: order.status,
+        productIndex: index,
+      }))
+    )
+    .filter((product) => !selectedDomain || product.domain === selectedDomain);
 
   return (
     <div className="user-dashboard">
@@ -349,47 +573,13 @@ export default function UserDashboard() {
                 {userCases.map((caseItem) => (
                   <div key={caseItem._id} className="case-card">
                     <h4>Case ID: {caseItem._id}</h4>
-                    <p>
-                      <strong>Order ID:</strong> {caseItem.orderId}
-                    </p>
-                    <p>
-                      <strong>Product Index:</strong> {caseItem.productIndex}
-                    </p>
-                    <p>
-                      <strong>Description:</strong> {caseItem.description}
-                    </p>
-                    <p>
-                      <strong>Priority:</strong> {caseItem.priority}
-                    </p>
-                    <p>
-                      <strong>Status:</strong> {caseItem.status}
-                    </p>
-                    <p>
-                      <strong>Created:</strong> {new Date(caseItem.createdAt).toLocaleString()}
-                    </p>
-                    <p>
-                      <strong>Updated:</strong> {new Date(caseItem.updatedAt).toLocaleString()}
-                    </p>
-                    <h5>Responses:</h5>
-                    <div className="response">
-                      {caseItem.responses.length > 0 ? (
-                        caseItem.responses.map((response, index) => (
-                          <div key={index} className="admin-msg">
-                            <div className="sender-info">{response.adminId?.name || "Support Bot"}</div>
-                            <div className="message-text">
-                              <ReactMarkdown>{response.message}</ReactMarkdown>
-                            </div>
-                            <div className="timestamp">
-                              {new Date(response.timestamp).toLocaleString()}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <p>
-                          <small>No responses yet.</small>
-                        </p>
-                      )}
-                    </div>
+                    <p><strong>Order ID:</strong> {caseItem.orderId}</p>
+                    <p><strong>Product Index:</strong> {caseItem.productIndex}</p>
+                    <p><strong>Description:</strong> {caseItem.description}</p>
+                    <p><strong>Priority:</strong> {caseItem.priority}</p>
+                    <p><strong>Status:</strong> {caseItem.status}</p>
+                    <p><strong>Created:</strong> {new Date(caseItem.createdAt).toLocaleString()}</p>
+                    <p><strong>Updated:</strong> {new Date(caseItem.updatedAt).toLocaleString()}</p>
                   </div>
                 ))}
               </div>
@@ -403,28 +593,55 @@ export default function UserDashboard() {
       {isChatOpen && (
         <div className="chat-container">
           <div className="chat-header">
-            <h3>
-              {selectedProduct ? `Chat for ${selectedProduct.name}` : "Support Chat"}
-            </h3>
-            <button className="close-chat" onClick={handleCloseChat}>
-              &times;
-            </button>
+            <h3>{selectedProduct ? `Chat for ${selectedProduct.name}` : "Support Chat"}</h3>
+            <div className="header-actions">
+              <button className="end-chat-btn" onClick={handleCloseChat} disabled={isEndingChat}>
+                {isEndingChat ? "Ended" : "End Chat"}
+              </button>
+              <button className="close-chat-btn" onClick={handleDirectClose}>
+                &times;
+              </button>
+            </div>
           </div>
+
           <div className="chat-box" ref={chatBoxRef}>
             {messages.length === 0 ? (
-              <h3><b>💬Start a conversation with our AI Assistant 🤖 for instant support.</b></h3>
+              <h3><b>💬 Start a conversation with our AI Assistant 🤖 for instant support.</b></h3>
             ) : (
               messages.map((msg, index) => (
-                <div key={index} className={msg.sender === "user" ? "user-msg" : "bot-msg"}>
+                <div
+                  key={index}
+                  className={
+                    msg.sender === "user" ? "user-msg" :
+                    msg.sender === "system" ? "system-msg" :
+                    msg.sender === "agent" ? "agent-msg" : "bot-msg"
+                  }
+                >
                   <div className="sender-info">{msg.senderName}</div>
                   <div className="message-text">
                     <ReactMarkdown>{msg.text}</ReactMarkdown>
                   </div>
-                  <div className="timestamp">{new Date(msg.timestamp).toLocaleString()}</div>
+                  <div className="timestamp">
+                    {new Date(msg.timestamp).toLocaleString()}
+                  </div>
                 </div>
               ))
             )}
+
+            {isBotTyping && !isEndingChat && (
+              <div className="bot-msg typing">
+                <div className="sender-info">Support Bot</div>
+                <div className="message-text">
+                  <span className="typing-dots">
+                    Typing<span className="dot">.</span>
+                    <span className="dot">.</span>
+                    <span className="dot">.</span>
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
+
           <div className="chat-input">
             <input
               type="text"
@@ -432,23 +649,11 @@ export default function UserDashboard() {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Type your message..."
-              disabled={loading}
+              disabled={loading || isBotTyping}
             />
-            <button onClick={() => handleSend()} disabled={loading}>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                width="24"
-                height="24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
+            <button onClick={handleSend} disabled={loading || isBotTyping || isEndingChat}>
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" width="24" height="24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </button>
           </div>
@@ -457,3 +662,6 @@ export default function UserDashboard() {
     </div>
   );
 }
+
+
+
