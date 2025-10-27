@@ -1,3 +1,4 @@
+
 // import express from "express";
 // import mongoose from "mongoose";
 // import dotenv from "dotenv";
@@ -431,7 +432,7 @@
 //       return res.status(404).json({ error: "Case not found" });
 //     }
 
-//     // realtime
+//     // realtime to case room and user
 //     const io = req.app.get("io");
 //     io.to(`case:${updatedCase._id}`).emit("case:message", {
 //       caseId: updatedCase._id,
@@ -455,7 +456,7 @@
 //       .to(`user:${updatedCase.userId._id || updatedCase.userId}`)
 //       .emit("case:status", { caseId: updatedCase._id, status: "in-progress" });
 
-//     // ALSO send as chat:reply so UIs listening only to chat:reply update too
+//     // chat:reply (user)
 //     io
 //       .to(`user:${updatedCase.userId._id || updatedCase.userId}`)
 //       .emit("chat:reply", {
@@ -467,6 +468,17 @@
 //         message,
 //         timestamp: Date.now(),
 //       });
+
+//     // NEW: mirror to all agents dashboards
+//     io.to("agents").emit("chat:reply", {
+//       userId: updatedCase.userId._id || updatedCase.userId,
+//       orderId: updatedCase.orderId,
+//       productIndex: updatedCase.productIndex,
+//       caseId: updatedCase._id,
+//       source: "agent",
+//       message,
+//       timestamp: Date.now(),
+//     });
 
 //     res.json({ message: "Response added successfully", case: updatedCase });
 //   } catch (err) {
@@ -550,8 +562,20 @@
 //         status: "resolved",
 //       });
 
-//       // ALSO mirror as chat:reply so the user chat shows it immediately
+//       // Mirror as chat:reply so the user chat shows it immediately
 //       io.to(`user:${updatedCase.userId._id}`).emit("chat:reply", {
+//         userId: updatedCase.userId._id,
+//         orderId: updatedCase.orderId,
+//         productIndex: updatedCase.productIndex,
+//         caseId: updatedCase._id,
+//         source: "agent",
+//         message:
+//           "Marked as resolved. If you need more help, tap 'Need more help'.",
+//         timestamp: Date.now(),
+//       });
+
+//       // NEW: mirror to agents dashboards as well
+//       io.to("agents").emit("chat:reply", {
 //         userId: updatedCase.userId._id,
 //         orderId: updatedCase.orderId,
 //         productIndex: updatedCase.productIndex,
@@ -695,7 +719,7 @@
 //     }
 //     const selectedProduct = JSON.parse(selected);
 //     const { orderId, productIndex, domain } = selectedProduct;
-//     const chatKey = `chat:${userId}:${orderId}:${productIndex}`;
+//     const chatKey = `chat:${userId}:${orderId}:${Number(productIndex)}`;
 //     const io = req.app.get("io");
 
 //     // refund path
@@ -749,7 +773,7 @@
 //       );
 //       await redisClient.expire(chatKey, 86400);
 
-//       // realtime
+//       // realtime to user
 //       io.to(`user:${userId}`).emit("chat:reply", {
 //         userId,
 //         orderId,
@@ -764,6 +788,17 @@
 //       io.to(`user:${userId}`).emit("case:status", {
 //         caseId: csCase._id,
 //         status: csCase.status, // open
+//       });
+
+//       // NEW: mirror to all agents dashboards
+//       io.to("agents").emit("chat:reply", {
+//         userId,
+//         orderId,
+//         productIndex,
+//         caseId: csCase._id,
+//         source: "refund",
+//         message: reply,
+//         timestamp: Date.now(),
 //       });
 
 //       return res.json({
@@ -803,6 +838,17 @@
 //         timestamp: Date.now(),
 //       });
 
+//       // NEW: mirror to agents dashboards
+//       io.to("agents").emit("chat:reply", {
+//         userId,
+//         orderId,
+//         productIndex,
+//         caseId: null,
+//         source: "faq",
+//         message: reply,
+//         timestamp: Date.now(),
+//       });
+
 //       return res.json({ reply, source: "faq", score: faqHit.score });
 //     }
 
@@ -829,6 +875,17 @@
 //       await redisClient.expire(chatKey, 86400);
 
 //       io.to(`user:${userId}`).emit("chat:reply", {
+//         userId,
+//         orderId,
+//         productIndex,
+//         caseId: top.caseId,
+//         source: "case-memory",
+//         message: reply,
+//         timestamp: Date.now(),
+//       });
+
+//       // NEW: mirror to agents dashboards
+//       io.to("agents").emit("chat:reply", {
 //         userId,
 //         orderId,
 //         productIndex,
@@ -918,6 +975,17 @@
 //       timestamp: Date.now(),
 //     });
 
+//     // NEW: mirror to agents dashboards
+//     io.to("agents").emit("chat:reply", {
+//       userId,
+//       orderId,
+//       productIndex,
+//       caseId: csCase._id,
+//       source: "llm",
+//       message: llmReply,
+//       timestamp: Date.now(),
+//     });
+
 //     // (optional) status broadcast on creation
 //     io.to(`user:${userId}`).emit("case:status", {
 //       caseId: csCase._id,
@@ -937,8 +1005,6 @@
 // });
 
 // /* ----------------------- Chat history (per-product) ---------------------- */
-// // If orderId & productIndex are provided -> return that thread
-// // else -> aggregate all user threads (SCAN)
 // app.get("/api/chat/history", authMiddleware, async (req, res) => {
 //   try {
 //     const userId = req.userId;
@@ -1013,7 +1079,7 @@
 //   });
 // });
 
-// // Unified thread: merges Redis chat + agent messages for a product
+// // Unified thread: merges Redis chat + agent messages for a product (user view)
 // app.get("/api/chat/thread", authMiddleware, async (req, res) => {
 //   try {
 //     const userId = req.userId;
@@ -1066,59 +1132,63 @@
 //   }
 // });
 
-// // User after-resolution action: reopen or thank you
-// app.post("/api/case/:id/user-action", authMiddleware, async (req, res) => {
-//   const { id } = req.params;
-//   const { action } = req.body;
-//   const io = req.app.get("io");
-
-//   const c = await Case.findById(id);
-//   if (!c) return res.status(404).json({ error: "Case not found" });
-//   if (String(c.userId) !== String(req.userId))
-//     return res.status(403).json({ error: "Forbidden" });
-
-//   if (action === "need_more_help") {
-//     c.status = "open";
-//     c.responses.push({
-//       adminId: null,
-//       message: "User tapped: Need more help — reopening the case.",
-//       timestamp: new Date(),
-//     });
-//     await c.save();
-
-//     io.to(`case:${c._id}`).emit("case:status", { caseId: c._id, status: "open" });
-//     io.to(`case:${c._id}`).emit("case:message", {
-//       caseId: c._id,
-//       sender: "system",
-//       message: "User reopened the case.",
-//       timestamp: Date.now(),
-//     });
-//     io.to(`user:${c.userId}`).emit("case:status", {
-//       caseId: c._id,
-//       status: "open",
-//     });
-
-//     return res.json({ message: "Case reopened", status: c.status });
+// /* ------------------- NEW: Admin unified thread by caseId ------------------ */
+// app.get("/api/admin/case/:id/unified-thread", authMiddleware, async (req, res) => {
+//   if (req.userRole !== "admin") {
+//     return res.status(403).json({ error: "Admin access required" });
 //   }
+//   try {
+//     const { id } = req.params;
+//     const doc = await Case.findById(id).lean();
+//     if (!doc) return res.status(404).json({ error: "Case not found" });
 
-//   if (action === "thank_you") {
-//     c.responses.push({
-//       adminId: null,
-//       message: "User tapped: Thank you — no further help needed.",
-//       timestamp: new Date(),
-//     });
-//     await c.save();
+//     const userId = String(doc.userId);
+//     const { orderId, productIndex } = doc;
+//     const chatKey = `chat:${userId}:${orderId}:${Number(productIndex)}`;
 
-//     io.to(`case:${c._id}`).emit("case:message", {
-//       caseId: c._id,
-//       sender: "system",
-//       message: "User confirmed resolution.",
-//       timestamp: Date.now(),
+//     // read redis turn list
+//     const raw = await redisClient.lRange(chatKey, 0, -1);
+//     const redisTurns = raw
+//       .map((r) => { try { return JSON.parse(r); } catch { return null; } })
+//       .filter(Boolean)
+//       .map((t) => ({
+//         source: t.source || "bot",
+//         sender: t.source === "agent" ? "agent" : "bot",
+//         message: t.reply,
+//         prompt: t.prompt,
+//         timestamp: t.timestamp || Date.now(),
+//         caseId: t.caseId || null,
+//       }));
+
+//     // agent messages from Mongo
+//     const agentMsgs = (doc.responses || []).map((r) => ({
+//       source: "agent",
+//       sender: "agent",
+//       message: r.message,
+//       timestamp: r.timestamp || doc.updatedAt || doc.createdAt || Date.now(),
+//       caseId: doc._id || null,
+//     }));
+
+//     const combined = [...redisTurns, ...agentMsgs].sort(
+//       (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
+//     );
+
+//     return res.json({
+//       case: {
+//         _id: doc._id,
+//         userId,
+//         orderId,
+//         productIndex,
+//         status: doc.status,
+//         priority: doc.priority,
+//         domain: doc.domain,
+//       },
+//       thread: combined,
 //     });
-//     return res.json({ message: "Acknowledged, thank you!" });
+//   } catch (err) {
+//     console.error("Admin unified thread error:", err);
+//     return res.status(500).json({ error: "Failed to fetch unified thread" });
 //   }
-
-//   return res.status(400).json({ error: "Invalid action" });
 // });
 
 // /* ------------------------------ MongoDB ---------------------------------- */
@@ -1249,6 +1319,21 @@ const redisClient = createClient({
 });
 redisClient.on("error", (err) => console.error("Redis Error:", err));
 await redisClient.connect();
+
+/* -------- Agent-only lock helpers (per case) -------- */
+const AGENT_ONLY_TTL = 30 * 60; // 30 minutes
+async function setAgentOnly(caseId) {
+  if (!caseId) return;
+  await redisClient.set(`agent-only:${caseId}`, "1", { EX: AGENT_ONLY_TTL });
+}
+async function isAgentOnly(caseId) {
+  if (!caseId) return false;
+  return Boolean(await redisClient.get(`agent-only:${caseId}`));
+}
+async function clearAgentOnly(caseId) {
+  if (!caseId) return;
+  await redisClient.del(`agent-only:${caseId}`);
+}
 
 /* ----------------------------- Gemini Models ----------------------------- */
 const GEMINI_MODELS = [
@@ -1664,7 +1749,7 @@ app.post("/api/case/:id/response", authMiddleware, async (req, res) => {
         timestamp: Date.now(),
       });
 
-    // NEW: mirror to all agents dashboards
+    // mirror to all agents dashboards
     io.to("agents").emit("chat:reply", {
       userId: updatedCase.userId._id || updatedCase.userId,
       orderId: updatedCase.orderId,
@@ -1674,6 +1759,9 @@ app.post("/api/case/:id/response", authMiddleware, async (req, res) => {
       message,
       timestamp: Date.now(),
     });
+
+    // Enable / renew agent-only mode for this case
+    await setAgentOnly(updatedCase._id);
 
     res.json({ message: "Response added successfully", case: updatedCase });
   } catch (err) {
@@ -1757,7 +1845,7 @@ app.put("/api/case/:id", authMiddleware, async (req, res) => {
         status: "resolved",
       });
 
-      // Mirror as chat:reply so the user chat shows it immediately
+      // Mirror as chat:reply to user
       io.to(`user:${updatedCase.userId._id}`).emit("chat:reply", {
         userId: updatedCase.userId._id,
         orderId: updatedCase.orderId,
@@ -1769,7 +1857,7 @@ app.put("/api/case/:id", authMiddleware, async (req, res) => {
         timestamp: Date.now(),
       });
 
-      // NEW: mirror to agents dashboards as well
+      // Mirror to agents dashboards as well
       io.to("agents").emit("chat:reply", {
         userId: updatedCase.userId._id,
         orderId: updatedCase.orderId,
@@ -1780,6 +1868,9 @@ app.put("/api/case/:id", authMiddleware, async (req, res) => {
           "Marked as resolved. If you need more help, tap 'Need more help'.",
         timestamp: Date.now(),
       });
+
+      // Clear agent-only lock after resolution
+      await clearAgentOnly(updatedCase._id);
 
       const lastMsgs = Array.isArray(updatedCase.responses)
         ? updatedCase.responses.slice(-6)
@@ -1816,6 +1907,20 @@ app.put("/api/case/:id", authMiddleware, async (req, res) => {
     console.error("Update case error:", err);
     res.status(500).json({ error: "Failed to update case" });
   }
+});
+
+/* ------------- Optional: Admin manual toggle agent-only mode ------------- */
+app.put("/api/case/:id/agent-only", authMiddleware, async (req, res) => {
+  if (req.userRole !== "admin") return res.status(403).json({ error: "Admin access required" });
+  const { id } = req.params;
+  const { enabled } = req.body;
+  const exists = await Case.exists({ _id: id });
+  if (!exists) return res.status(404).json({ error: "Case not found" });
+
+  if (enabled) await setAgentOnly(id);
+  else await clearAgentOnly(id);
+
+  res.json({ message: `agent-only ${enabled ? "enabled" : "disabled"}`, caseId: id });
 });
 
 /* -------------------------------- Signup --------------------------------- */
@@ -1917,6 +2022,50 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
     const chatKey = `chat:${userId}:${orderId}:${Number(productIndex)}`;
     const io = req.app.get("io");
 
+    /* --------- Ensure case exists and apply AGENT-ONLY short-circuit --------- */
+    let existingCase = await Case.findOne({ userId, orderId, productIndex }).lean();
+    if (!existingCase) {
+      // create minimal open case (first time user talks)
+      existingCase = await new Case({
+        userId, orderId, productIndex, description: message, priority: "low", domain, status: "open",
+      }).save();
+      existingCase = existingCase.toObject();
+    }
+
+    // If agent-only lock is ON, don't run FAQ/CaseMemory/Gemini
+    if (await isAgentOnly(existingCase._id)) {
+      await redisClient.rPush(
+        chatKey,
+        JSON.stringify({
+          prompt: message,
+          reply: null, // no automated reply
+          orderId,
+          productIndex,
+          caseId: existingCase._id,
+          timestamp: Date.now(),
+          source: "user",
+        })
+      );
+      await redisClient.expire(chatKey, 86400);
+
+      // notify agents so they can reply from dashboard
+      io.to("agents").emit("chat:user", {
+        userId,
+        orderId,
+        productIndex,
+        caseId: existingCase._id,
+        message,
+        timestamp: Date.now(),
+      });
+
+      return res.json({
+        queued: true,
+        routed: "human_agent",
+        caseId: existingCase._id,
+      });
+    }
+    /* ------------------------------------------------------------------------ */
+
     // refund path
     const REFUND_WORDS = [
       "refund",
@@ -1979,13 +2128,13 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
         timestamp: Date.now(),
       });
 
-      // (optional) status broadcast
+      // status broadcast
       io.to(`user:${userId}`).emit("case:status", {
         caseId: csCase._id,
         status: csCase.status, // open
       });
 
-      // NEW: mirror to all agents dashboards
+      // mirror to agents dashboards
       io.to("agents").emit("chat:reply", {
         userId,
         orderId,
@@ -2033,7 +2182,7 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
         timestamp: Date.now(),
       });
 
-      // NEW: mirror to agents dashboards
+      // mirror to agents dashboards
       io.to("agents").emit("chat:reply", {
         userId,
         orderId,
@@ -2079,7 +2228,7 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
         timestamp: Date.now(),
       });
 
-      // NEW: mirror to agents dashboards
+      // mirror to agents dashboards
       io.to("agents").emit("chat:reply", {
         userId,
         orderId,
@@ -2102,7 +2251,7 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
     const prompt = [
       `You are a customer-support assistant for ${domain}.`,
       `User: ${userObj.name} (${userObj.email})`,
-      `Product: ${selectedProduct.name} x${selectedProduct.quantity} ₹${selectedProduct.price}`,
+      `Product: ${selectedProduct.name} x${selectedProduct.quantity} ₹${selectedProduct.price} ${selectedProduct.status}`,
       `Order: ${orderId}`,
       `Instruction:`,
       `- Give a concise helpful answer.`,
@@ -2170,7 +2319,7 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
       timestamp: Date.now(),
     });
 
-    // NEW: mirror to agents dashboards
+    // mirror to agents dashboards
     io.to("agents").emit("chat:reply", {
       userId,
       orderId,
@@ -2181,7 +2330,7 @@ app.post("/api/chat", authMiddleware, async (req, res) => {
       timestamp: Date.now(),
     });
 
-    // (optional) status broadcast on creation
+    // status broadcast on creation
     io.to(`user:${userId}`).emit("case:status", {
       caseId: csCase._id,
       status: csCase.status, // open
@@ -2327,7 +2476,7 @@ app.get("/api/chat/thread", authMiddleware, async (req, res) => {
   }
 });
 
-/* ------------------- NEW: Admin unified thread by caseId ------------------ */
+/* ------------------- Admin unified thread by caseId ------------------ */
 app.get("/api/admin/case/:id/unified-thread", authMiddleware, async (req, res) => {
   if (req.userRole !== "admin") {
     return res.status(403).json({ error: "Admin access required" });
@@ -2341,7 +2490,6 @@ app.get("/api/admin/case/:id/unified-thread", authMiddleware, async (req, res) =
     const { orderId, productIndex } = doc;
     const chatKey = `chat:${userId}:${orderId}:${Number(productIndex)}`;
 
-    // read redis turn list
     const raw = await redisClient.lRange(chatKey, 0, -1);
     const redisTurns = raw
       .map((r) => { try { return JSON.parse(r); } catch { return null; } })
@@ -2355,7 +2503,6 @@ app.get("/api/admin/case/:id/unified-thread", authMiddleware, async (req, res) =
         caseId: t.caseId || null,
       }));
 
-    // agent messages from Mongo
     const agentMsgs = (doc.responses || []).map((r) => ({
       source: "agent",
       sender: "agent",
